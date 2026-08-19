@@ -1,0 +1,99 @@
+@page "/fila"
+@inject HttpClient Http
+@using SistemaOrdemServico.DTOs
+@using SistemaOrdemServico.Domain.Enums
+
+<h3>🏭 Fila do Setor - @setorAtual</h3>
+
+<div class="mb-3 col-md-4">
+    <label class="form-label">Simular Setor Logado:</label>
+    <select class="form-select" @bind="setorAtual" @bind:after="CarregarFila">
+        @foreach (var setor in Enum.GetValues<SetorEnum>())
+        {
+            <option value="@setor">@setor</option>
+        }
+    </select>
+</div>
+
+@if (fluxos == null)
+{
+    <p><em>Carregando...</em></p>
+}
+else if (!fluxos.Any())
+{
+    <div class="alert alert-info">Nenhuma OS na fila deste setor.</div>
+}
+else
+{
+    <table class="table table-striped align-middle">
+        <thead>
+            <tr>
+                <th>OS</th>
+                <th>Fluxo</th>
+                <th>Status</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var f in fluxos)
+            {
+                <tr>
+                    <td><strong>@f.NumeroOS</strong></td>
+                    <td>@f.IdentificadorFluxo</td>
+                    <td><span class="badge bg-secondary">@f.Status</span></td>
+                    <td>
+                        @if (f.Status == StatusFluxo.AguardandoRecebimento)
+                        {
+                            <button class="btn btn-success btn-sm" @onclick="() => Receber(f.Id)">
+                                📥 Receber
+                            </button>
+                        }
+                        else if (f.Status == StatusFluxo.EmExecucao)
+                        {
+                            <div class="input-group">
+                                <select class="form-select form-select-sm" @bind="destinoSelecionado">
+                                    <option value="">Selecione o Destino...</option>
+                                    @foreach (var setor in Enum.GetValues<SetorEnum>())
+                                    {
+                                        <option value="@setor">@setor</option>
+                                    }
+                                </select>
+                                <button class="btn btn-primary btn-sm" @onclick="() => Despachar(f.Id)">
+                                    🚀 Despachar
+                                </button>
+                            </div>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private SetorEnum setorAtual = SetorEnum.Impressao;
+    private SetorEnum? destinoSelecionado;
+    private List<FluxoResponseDto>? fluxos;
+
+    protected override async Task OnInitializedAsync() => await CarregarFila();
+
+    private async Task CarregarFila()
+    {
+        fluxos = await Http.GetFromJsonAsync<List<FluxoResponseDto>>($"api/Fluxos/fila-setor/{setorAtual}");
+    }
+
+    private async Task Receber(Guid id)
+    {
+        var dto = new ReceberFluxoDto(Guid.NewGuid());
+        await Http.PostAsJsonAsync($"api/Fluxos/{id}/receber", dto);
+        await CarregarFila();
+    }
+
+    private async Task Despachar(Guid id)
+    {
+        if (destinoSelecionado == null) return;
+        var dto = new DespacharFluxoDto(destinoSelecionado.Value, Guid.NewGuid());
+        await Http.PostAsJsonAsync($"api/Fluxos/{id}/despachar", dto);
+        await CarregarFila();
+    }
+}

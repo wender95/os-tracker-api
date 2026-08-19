@@ -1,0 +1,49 @@
+@page "/login"
+@inject CustomAuthStateProvider AuthProvider
+@inject NavigationManager Nav
+@using SistemaOrdemServico.Domain.Enums
+
+<div class="container mt-5 d-flex justify-content-center">
+    <div class="card p-4 shadow-sm col-md-5">
+        <h3 class="text-center mb-3">🔒 Login OS Tracker</h3>
+
+        <div class="mb-3">
+            <label class="form-label">Email / Usuário:</label>
+            <input class="form-control" @bind="email" placeholder="operador@empresa.com" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Perfil de Acesso:</label>
+            <select class="form-select" @bind="perfil">
+                <option value="Operacional">Operacional (Chão de Fábrica)</option>
+                <option value="Vendedor">Vendedor (Comercial)</option>
+                <option value="Admin">Administrador / TI</option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Setor de Atuação:</label>
+            <select class="form-select" @bind="setor">
+                @foreach (var s in Enum.GetValues<SetorEnum>())
+                {
+                    <option value="@s">@s</option>
+                }
+            </select>
+        </div>
+
+        <button class="btn btn-primary w-100 mt-2" @onclick="Entrar">Entrar no Sistema</button>
+    </div>
+</div>
+
+@code {
+    private string email = "operador@fábrica.com";
+    private string perfil = "Operacional";
+    private SetorEnum setor = SetorEnum.Impressao;
+
+    private void Entrar()
+    {
+        // Simula login atribuindo o perfil e o setor ao contexto da sessão
+        AuthProvider.MarkUserAsAuthenticated(email, perfil, setor.ToString(), Guid.NewGuid());
+        Nav.NavigateTo("/");
+    }
+}

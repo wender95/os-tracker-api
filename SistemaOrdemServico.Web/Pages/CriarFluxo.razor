@@ -1,0 +1,46 @@
+@page "/criar-fluxo"
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<h3>➕ Nova Ordem de Serviço / Fluxo</h3>
+
+<div class="card p-4 col-md-6">
+    <div class="mb-3">
+        <label class="form-label">Número da OS (ERP):</label>
+        <input class="form-control" @bind="numeroOS" placeholder="Ex: OS-5050" />
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Identificador do Fluxo:</label>
+        <input class="form-control" @bind="identificadorFluxo" placeholder="Ex: Lona Impressa, Frota..." />
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Setor Inicial:</label>
+        <select class="form-select" @bind="setorInicial">
+            @foreach (var setor in Enum.GetValues<SetorEnum>())
+            {
+                <option value="@setor">@setor</option>
+            }
+        </select>
+    </div>
+
+    <button class="btn btn-primary" @onclick="Salvar">Criar Fluxo</button>
+</div>
+
+@code {
+    private string numeroOS = "";
+    private string identificadorFluxo = "";
+    private SetorEnum setorInicial = SetorEnum.Impressao;
+
+    private async Task Salvar()
+    {
+        var dto = new CriarFluxoDto(numeroOS, identificadorFluxo, setorInicial, Guid.NewGuid());
+        var response = await Http.PostAsJsonAsync("api/Fluxos", dto);
+
+        if (response.IsSuccessStatusCode)
+        {
+            Nav.NavigateTo("/fila");
+        }
+    }
+}

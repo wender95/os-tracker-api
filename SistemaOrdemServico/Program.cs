@@ -6,6 +6,17 @@ using SistemaOrdemServico.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 1. Configurar política de CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -13,7 +24,6 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Repositório atualizado
 builder.Services.AddScoped<IFluxoRepository, FluxoRepository>();
 
 var app = builder.Build();
@@ -25,6 +35,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+// 2. Ativar o CORS na aplicação
+app.UseCors("AllowAll");
 
 app.UseAuthorization();
 app.MapControllers();
