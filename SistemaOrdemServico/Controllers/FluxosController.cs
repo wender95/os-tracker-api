@@ -1,11 +1,6 @@
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using SistemaOrdemServico.Domain.Entities;
+using Microsoft.Data.Sqlite;
 using SistemaOrdemServico.Domain.Enums;
-using SistemaOrdemServico.Domain.Interfaces;
-using SistemaOrdemServico.Domain.Services;
 using SistemaOrdemServico.DTOs;
 
 namespace SistemaOrdemServico.Controllers;
@@ -14,128 +9,182 @@ namespace SistemaOrdemServico.Controllers;
 [Route("api/[controller]")]
 public class FluxosController : ControllerBase
 {
-    private readonly IFluxoRepository _repository;
+    private readonly string _connectionString = "Data Source=ordensservico.db";
 
-    public FluxosController(IFluxoRepository repository)
+    public FluxosController()
     {
-        _repository = repository;
+        CriarTabelaSeNaoExistir();
     }
 
-    /// <summary>
-    /// RF01 - Cria um novo fluxo operacional para uma OS (Vendedor)
-    /// </summary>
-    [HttpPost]
-    public async Task<ActionResult<FluxoResponseDto>> Criar([FromBody] CriarFluxoDto dto)
+    private void CriarTabelaSeNaoExistir()
     {
-        var fluxo = new FluxoOS(dto.NumeroOS, dto.IdentificadorFluxo, dto.SetorInicial, dto.UsuarioVendedorId);
-        await _repository.AdicionarAsync(fluxo);
-
-        return CreatedAtAction(nameof(ObterPorId), new { id = fluxo.Id }, MapearParaDto(fluxo));
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+        var command = connection.CreateCommand();
+        command.CommandText = @"
+            CREATE TABLE IF NOT EXISTS FluxosTabela (
+                Id TEXT PRIMARY KEY,
+                NumeroOS TEXT,
+                IdentificadorFluxo TEXT,
+                NomeCliente TEXT,
+                SetorAtual INTEGER,
+                Status INTEGER
+            );";
+        command.ExecuteNonQuery();
     }
 
-    /// <summary>
-    /// RF02 - Exibe a fila de trabalho do setor logado
-    /// </summary>
-    [HttpGet("fila-setor/{setor}")]
-    public async Task<ActionResult> ObterFilaDoSetor(SetorEnum setor)
+    [HttpGet]
+    public ActionResult<List<FluxoResponseDto>> ObterTodos()
     {
-        var fluxos = await _repository.ObterFilaDoSetorAsync(setor);
-        return Ok(fluxos.Select(MapearParaDto));
-    }
+        var lista = new List<FluxoResponseDto>();
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
 
-    /// <summary>
-    /// RF02 - Operador clica em "Receber" na fila do seu setor
-    /// </summary>
-    [HttpPost("{id}/receber")]
-    public async Task<IActionResult> Receber(Guid id, [FromBody] ReceberFluxoDto dto)
-    {
-        var fluxo = await _repository.ObterPorIdAsync(id);
-        if (fluxo == null) return NotFound("Fluxo de OS não encontrado.");
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, NumeroOS, IdentificadorFluxo, NomeCliente, SetorAtual, Status FROM FluxosTabela;";
 
-        fluxo.Receber(dto.UsuarioOperadorId);
-        await _repository.AtualizarAsync(fluxo);
-
-        return Ok(MapearParaDto(fluxo));
-    }
-
-    /// <summary>
-    /// RF03 - Operador despacha o fluxo para o próximo setor validando a Matriz de Transição
-    /// </summary>
-    [HttpPost("{id}/despachar")]
-    public async Task<IActionResult> Despachar(Guid id, [FromBody] DespacharFluxoDto dto)
-    {
-        var fluxo = await _repository.ObterPorIdAsync(id);
-        if (fluxo == null) return NotFound("Fluxo de OS não encontrado.");
-
-        // Validação da Matriz de Transição rígida + Regra de Exceção (Retorno)
-        bool transicaoValida = MatrizTransicaoService.TransicaoEhValida(fluxo.SetorAtual, dto.SetorDestino, fluxo.SetorAnterior);
-        if (!transicaoValida)
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
         {
-            return BadRequest($"Transição de setor não permitida: de {fluxo.SetorAtual} para {dto.SetorDestino}.");
+            lista.Add(new FluxoResponseDto
+            {
+                Id = Guid.Parse(reader.GetString(0)),
+                NumeroOS = reader.IsDBNull(1) ? "" : reader.GetString(1),
+                IdentificadorFluxo = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                NomeCliente = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                SetorAtual = (SetorEnum)reader.GetInt32(4),
+                Status = (StatusFluxo)reader.GetInt32(5)
+            });
         }
 
-        fluxo.Despachar(dto.SetorDestino, dto.UsuarioId);
-        await _repository.AtualizarAsync(fluxo);
-
-        return Ok(MapearParaDto(fluxo));
+        return Ok(lista);
     }
 
-    /// <summary>
-    /// RF06 - Cancelamento do fluxo com justificativa obrigatória
-    /// </summary>
-    [HttpPost("{id}/cancelar")]
-    public async Task<IActionResult> Cancelar(Guid id, [FromBody] CancelarFluxoDto dto)
+    [HttpGet("setor/{setorId}")]
+    public ActionResult<List<FluxoResponseDto>> ObterPorSetor(int setorId)
     {
-        var fluxo = await _repository.ObterPorIdAsync(id);
-        if (fluxo == null) return NotFound("Fluxo de OS não encontrado.");
+        var lista = new List<FluxoResponseDto>();
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
 
-        fluxo.Cancelar(dto.Motivo, dto.UsuarioId);
-        await _repository.AtualizarAsync(fluxo);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, NumeroOS, IdentificadorFluxo, NomeCliente, SetorAtual, Status FROM FluxosTabela WHERE SetorAtual = @setorId;";
+        command.Parameters.AddWithValue("@setorId", setorId);
 
-        return Ok(MapearParaDto(fluxo));
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            lista.Add(new FluxoResponseDto
+            {
+                Id = Guid.Parse(reader.GetString(0)),
+                NumeroOS = reader.IsDBNull(1) ? "" : reader.GetString(1),
+                IdentificadorFluxo = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                NomeCliente = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                SetorAtual = (SetorEnum)reader.GetInt32(4),
+                Status = (StatusFluxo)reader.GetInt32(5)
+            });
+        }
+
+        return Ok(lista);
     }
 
-    /// <summary>
-    /// RF05 - Consulta um fluxo por ID com linha do tempo completa
-    /// </summary>
+    [HttpPost]
+    public ActionResult<FluxoResponseDto> Criar([FromBody] CriarFluxoDto dto)
+    {
+        if (dto == null) return BadRequest("Dados inválidos.");
+
+        var id = Guid.NewGuid();
+        var numOS = dto.NumeroOS ?? string.Empty;
+        var identFluxo = dto.IdentificadorFluxo ?? string.Empty;
+        var nomeCliente = dto.NomeCliente ?? string.Empty;
+
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT INTO FluxosTabela (Id, NumeroOS, IdentificadorFluxo, NomeCliente, SetorAtual, Status)
+            VALUES (@id, @numeroOS, @identificadorFluxo, @nomeCliente, @setorAtual, @status);";
+
+        command.Parameters.AddWithValue("@id", id.ToString());
+        command.Parameters.AddWithValue("@numeroOS", numOS);
+        command.Parameters.AddWithValue("@identificadorFluxo", identFluxo);
+        command.Parameters.AddWithValue("@nomeCliente", nomeCliente);
+        command.Parameters.AddWithValue("@setorAtual", (int)dto.SetorInicial);
+        command.Parameters.AddWithValue("@status", 0);
+
+        command.ExecuteNonQuery();
+
+        var resposta = new FluxoResponseDto
+        {
+            Id = id,
+            NumeroOS = numOS,
+            IdentificadorFluxo = identFluxo,
+            NomeCliente = nomeCliente,
+            SetorAtual = dto.SetorInicial,
+            Status = (StatusFluxo)0
+        };
+
+        return Ok(resposta);
+    }
+
     [HttpGet("{id}")]
-    public async Task<ActionResult<FluxoResponseDto>> ObterPorId(Guid id)
+    public ActionResult<FluxoResponseDto> ObterPorId(Guid id)
     {
-        var fluxo = await _repository.ObterPorIdAsync(id);
-        if (fluxo == null) return NotFound("Fluxo de OS não encontrado.");
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
 
-        return Ok(MapearParaDto(fluxo));
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, NumeroOS, IdentificadorFluxo, NomeCliente, SetorAtual, Status FROM FluxosTabela WHERE Id = @id;";
+        command.Parameters.AddWithValue("@id", id.ToString());
+
+        using var reader = command.ExecuteReader();
+        if (reader.Read())
+        {
+            return Ok(new FluxoResponseDto
+            {
+                Id = Guid.Parse(reader.GetString(0)),
+                NumeroOS = reader.IsDBNull(1) ? "" : reader.GetString(1),
+                IdentificadorFluxo = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                NomeCliente = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                SetorAtual = (SetorEnum)reader.GetInt32(4),
+                Status = (StatusFluxo)reader.GetInt32(5)
+            });
+        }
+
+        return NotFound();
     }
 
-    /// <summary>
-    /// RF01 - Consulta todos os fluxos de uma OS (Split de fluxos)
-    /// </summary>
-    [HttpGet("os/{numeroOS}")]
-    public async Task<ActionResult> ObterPorNumeroOS(string numeroOS)
+    [HttpPost("{id}/receber")]
+    public IActionResult Receber(Guid id, [FromBody] ReceberFluxoDto dto)
     {
-        var fluxos = await _repository.ObterPorNumeroOSAsync(numeroOS);
-        return Ok(fluxos.Select(MapearParaDto));
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var command = connection.CreateCommand();
+        command.CommandText = "UPDATE FluxosTabela SET Status = 1 WHERE Id = @id;";
+        command.Parameters.AddWithValue("@id", id.ToString());
+
+        var linhasAfetadas = command.ExecuteNonQuery();
+        if (linhasAfetadas == 0) return NotFound();
+
+        return Ok();
     }
 
-    private static FluxoResponseDto MapearParaDto(FluxoOS fluxo)
+    [HttpPost("{id}/despachar")]
+    public IActionResult Despachar(Guid id, [FromBody] DespacharFluxoDto dto)
     {
-        return new FluxoResponseDto(
-            fluxo.Id,
-            fluxo.NumeroOS,
-            fluxo.IdentificadorFluxo,
-            fluxo.SetorAtual,
-            fluxo.SetorAnterior,
-            fluxo.Status,
-            fluxo.DataCriacao,
-            fluxo.DataEncerramento,
-            fluxo.Eventos.Select(e => new EventoMovimentacaoResponseDto(
-                e.Id,
-                e.Setor,
-                e.TipoEvento,
-                e.UsuarioId,
-                e.Timestamp,
-                e.MotivoJustificativa
-            ))
-        );
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var command = connection.CreateCommand();
+        command.CommandText = "UPDATE FluxosTabela SET SetorAtual = @setorDestino, Status = 0 WHERE Id = @id;";
+        command.Parameters.AddWithValue("@id", id.ToString());
+        command.Parameters.AddWithValue("@setorDestino", (int)dto.SetorDestino);
+
+        var linhasAfetadas = command.ExecuteNonQuery();
+        if (linhasAfetadas == 0) return NotFound();
+
+        return Ok();
     }
 }
