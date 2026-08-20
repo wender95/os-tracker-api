@@ -1,46 +1,118 @@
-@page "/criar-fluxo"
+@page "/nova-os"
+@using Microsoft.AspNetCore.Authorization
+@using SistemaOrdemServico.Domain.Enums
+@using SistemaOrdemServico.DTOs
+@using System.Net.Http.Headers
+@attribute [Authorize]
 @inject HttpClient Http
-@inject NavigationManager Nav
+@inject NavigationManager Navigation
+@inject CustomAuthStateProvider AuthStateProvider
 
-<h3>➕ Nova Ordem de Serviço / Fluxo</h3>
-
-<div class="card p-4 col-md-6">
-    <div class="mb-3">
-        <label class="form-label">Número da OS (ERP):</label>
-        <input class="form-control" @bind="numeroOS" placeholder="Ex: OS-5050" />
+<div class="container py-4" style="max-width: 600px;">
+    <div class="d-flex align-items-center gap-2 mb-4">
+        <span class="fs-3">📋</span>
+        <div>
+            <h4 class="fw-bold mb-0" style="color: #0b2f6b;">Nova Ordem de Serviço</h4>
+            <span class="text-muted small">Comercial · Fluxo de Produção</span>
+        </div>
     </div>
 
-    <div class="mb-3">
-        <label class="form-label">Identificador do Fluxo:</label>
-        <input class="form-control" @bind="identificadorFluxo" placeholder="Ex: Lona Impressa, Frota..." />
-    </div>
+    <div class="card border-0 shadow-sm rounded-4 p-4">
+        @if (!string.IsNullOrEmpty(mensagemErro))
+        {
+            <div class="alert alert-danger py-2 px-3 small rounded-3 mb-3">
+                ❌ @mensagemErro
+            </div>
+        }
 
-    <div class="mb-3">
-        <label class="form-label">Setor Inicial:</label>
-        <select class="form-select" @bind="setorInicial">
-            @foreach (var setor in Enum.GetValues<SetorEnum>())
-            {
-                <option value="@setor">@setor</option>
-            }
-        </select>
-    </div>
+        <EditForm Model="@novaOs" OnValidSubmit="@SalvarOs">
+            <div class="mb-3">
+                <label class="form-label text-muted small fw-bold">NÚMERO DA OS</label>
+                <InputText class="form-control" @bind-Value="novaOs.NumeroOS" placeholder="Ex: OS-2026-001" />
+            </div>
 
-    <button class="btn btn-primary" @onclick="Salvar">Criar Fluxo</button>
+            <div class="mb-3">
+                <label class="form-label text-muted small fw-bold">IDENTIFICADOR / JOB</label>
+                <InputText class="form-control" @bind-Value="novaOs.IdentificadorFluxo" placeholder="Ex: Lona Fachada 3x1m" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label text-muted small fw-bold">NOME DO CLIENTE</label>
+                <InputText class="form-control" @bind-Value="novaOs.NomeCliente" placeholder="Ex: Empresa X" />
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label text-muted small fw-bold">SETOR INICIAL</label>
+                <InputSelect class="form-select" @bind-Value="novaOs.SetorInicial">
+                    @foreach (var setor in Enum.GetValues<SetorEnum>())
+                    {
+                        <option value="@setor">@setor</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-light w-50" @onclick='() => Navigation.NavigateTo("")'>Cancelar</button>
+                <button type="submit" class="btn text-white fw-bold w-50" style="background-color: #0b2f6b;" disabled="@processando">
+                    @(processando ? "Salvando..." : "Criar OS")
+                </button>
+            </div>
+        </EditForm>
+    </div>
 </div>
 
 @code {
-    private string numeroOS = "";
-    private string identificadorFluxo = "";
-    private SetorEnum setorInicial = SetorEnum.Impressao;
+    private NovaOsModel novaOs = new();
+    private string mensagemErro = string.Empty;
+    private bool processando = false;
 
-    private async Task Salvar()
+    private async Task SalvarOs()
     {
-        var dto = new CriarFluxoDto(numeroOS, identificadorFluxo, setorInicial, Guid.NewGuid());
-        var response = await Http.PostAsJsonAsync("api/Fluxos", dto);
+        mensagemErro = string.Empty;
+        processando = true;
 
-        if (response.IsSuccessStatusCode)
+        try
         {
-            Nav.NavigateTo("/fila");
+            var token = await AuthStateProvider.GetTokenAsync();
+            if (!string.IsNullOrEmpty(token))
+            {
+                Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+
+            var dto = new
+            {
+                NumeroOS = novaOs.NumeroOS,
+                IdentificadorFluxo = novaOs.IdentificadorFluxo,
+                NomeCliente = novaOs.NomeCliente,
+                SetorInicial = (int)novaOs.SetorInicial
+            };
+
+            var res = await Http.PostAsJsonAsync("api/Fluxos", dto);
+
+            if (res.IsSuccessStatusCode)
+            {
+                Navigation.NavigateTo("");
+            }
+            else
+            {
+                mensagemErro = await res.Content.ReadAsStringAsync();
+            }
         }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Falha de conexão: {ex.Message}";
+        }
+        finally
+        {
+            processando = false;
+        }
+    }
+
+    public class NovaOsModel
+    {
+        public string NumeroOS { get; set; } = string.Empty;
+        public string IdentificadorFluxo { get; set; } = string.Empty;
+        public string NomeCliente { get; set; } = string.Empty;
+        public SetorEnum SetorInicial { get; set; } = SetorEnum.Vendas;
     }
 }

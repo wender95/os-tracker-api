@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
+using System.IO;
 
 namespace SistemaOrdemServico.Controllers;
 
@@ -7,7 +8,8 @@ namespace SistemaOrdemServico.Controllers;
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
 {
-    private readonly string _connectionString = "Data Source=ordensservico.db";
+    private static readonly string _caminhoBanco = Path.Combine(Directory.GetCurrentDirectory(), "ordensservico.db");
+    private readonly string _connectionString = $"Data Source={_caminhoBanco}";
 
     public AuthController()
     {
@@ -19,50 +21,23 @@ public class AuthController : ControllerBase
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
 
-        // 1. Recria a tabela caso a estrutura antiga não possua a coluna Usuario
-        var checkColCmd = connection.CreateCommand();
-        checkColCmd.CommandText = "PRAGMA table_info(Usuarios);";
-        
-        bool temColunaUsuario = false;
-        using (var reader = checkColCmd.ExecuteReader())
-        {
-            while (reader.Read())
-            {
-                var nomeColuna = reader.GetString(1);
-                if (nomeColuna.Equals("Usuario", StringComparison.OrdinalIgnoreCase))
-                {
-                    temColunaUsuario = true;
-                    break;
-                }
-            }
-        }
-
-        // Se a tabela existe mas está na versão antiga sem 'Usuario', exclui para recriar
-        if (!temColunaUsuario)
-        {
-            var dropCmd = connection.CreateCommand();
-            dropCmd.CommandText = "DROP TABLE IF EXISTS Usuarios;";
-            dropCmd.ExecuteNonQuery();
-        }
-
-        // 2. Cria a tabela correta
+        // 1. Garante que a tabela tenha apenas os campos necessários (Usuario, Senha, Setor, Role)
         var createCmd = connection.CreateCommand();
         createCmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS Usuarios (
                 Id TEXT PRIMARY KEY,
                 Usuario TEXT UNIQUE COLLATE NOCASE,
-                Email TEXT,
                 Senha TEXT,
                 Setor TEXT,
                 Role TEXT
             );";
         createCmd.ExecuteNonQuery();
 
-        // 3. Insere o usuário admin padrão
+        // 2. Insere o admin padrão se não existir
         var insertCmd = connection.CreateCommand();
         insertCmd.CommandText = @"
-            INSERT OR IGNORE INTO Usuarios (Id, Usuario, Email, Senha, Setor, Role)
-            VALUES ('admin-id-padrao', 'admin', 'admin@adesipar.com', '123456', 'Criacao', 'Administrador');";
+            INSERT OR IGNORE INTO Usuarios (Id, Usuario, Senha, Setor, Role)
+            VALUES ('admin-id-padrao', 'admin', '123456', 'Vendas', 'Administrador');";
         insertCmd.ExecuteNonQuery();
     }
 
@@ -102,7 +77,7 @@ public class AuthController : ControllerBase
         connection.Open();
 
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, COALESCE(Usuario, Email), Setor, Role FROM Usuarios;";
+        command.CommandText = "SELECT Id, Usuario, Setor, Role FROM Usuarios;";
 
         using var reader = command.ExecuteReader();
         while (reader.Read())
@@ -130,14 +105,13 @@ public class AuthController : ControllerBase
 
         var command = connection.CreateCommand();
         command.CommandText = @"
-            INSERT INTO Usuarios (Id, Usuario, Email, Senha, Setor, Role)
-            VALUES (@id, @usuario, @email, @senha, @setor, @role);";
+            INSERT INTO Usuarios (Id, Usuario, Senha, Setor, Role)
+            VALUES (@id, @usuario, @senha, @setor, @role);";
 
         command.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
         command.Parameters.AddWithValue("@usuario", dto.Usuario.Trim());
-        command.Parameters.AddWithValue("@email", dto.Usuario.Trim() + "@adesipar.com");
         command.Parameters.AddWithValue("@senha", string.IsNullOrWhiteSpace(dto.Senha) ? "123456" : dto.Senha);
-        command.Parameters.AddWithValue("@setor", string.IsNullOrWhiteSpace(dto.Setor) ? "Criacao" : dto.Setor);
+        command.Parameters.AddWithValue("@setor", string.IsNullOrWhiteSpace(dto.Setor) ? "Vendas" : dto.Setor);
         command.Parameters.AddWithValue("@role", string.IsNullOrWhiteSpace(dto.Role) ? "Operador" : dto.Role);
 
         try

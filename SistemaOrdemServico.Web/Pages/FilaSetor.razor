@@ -1,99 +1,405 @@
-@page "/fila"
-@inject HttpClient Http
-@using SistemaOrdemServico.DTOs
+@page "/fila-setor"
+@using Microsoft.AspNetCore.Authorization
 @using SistemaOrdemServico.Domain.Enums
+@using SistemaOrdemServico.DTOs
+@using System.Net.Http.Headers
+@using System.Security.Claims
+@attribute [Authorize]
+@inject HttpClient Http
+@inject CustomAuthStateProvider AuthStateProvider
 
-<h3>🏭 Fila do Setor - @setorAtual</h3>
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="fw-bold mb-0" style="color: #0b2f6b;">📋 Fila de Produção por Setor</h4>
+            <span class="text-muted small">Acompanhamento e movimentação de OSs</span>
+        </div>
+    </div>
 
-<div class="mb-3 col-md-4">
-    <label class="form-label">Simular Setor Logado:</label>
-    <select class="form-select" @bind="setorAtual" @bind:after="CarregarFila">
+    @if (!string.IsNullOrEmpty(mensagemErro))
+    {
+        <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+            ❌ @mensagemErro
+            <button type="button" class="btn-close" @onclick="() => mensagemErro = string.Empty"></button>
+        </div>
+    }
+
+    <!-- Navegação de Setores -->
+    <ul class="nav nav-pills mb-4 gap-2">
         @foreach (var setor in Enum.GetValues<SetorEnum>())
         {
-            <option value="@setor">@setor</option>
+            <li class="nav-item">
+                <button class="nav-link px-3 py-2 rounded-3 @(setorSelecionado == setor ? "active fw-bold" : "bg-white text-dark border")" 
+                        @onclick="() => SelecionarSetor(setor)">
+                    @setor
+                </button>
+            </li>
         }
-    </select>
+    </ul>
+
+    <!-- Listagem Ativa -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="fw-bold mb-0" style="color: #0b2f6b;">Setor Atual: @setorSelecionado</h6>
+            <span class="badge bg-light text-primary border rounded-pill px-3">@ordens.Count OS(s) em aberto</span>
+        </div>
+
+        @if (carregando)
+        {
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary" role="status"></div>
+            </div>
+        }
+        else if (!ordens.Any())
+        {
+            <div class="text-center py-5 text-muted">
+                Nenhuma Ordem de Serviço em aberto no setor <strong>@setorSelecionado</strong>.
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table align-middle">
+                    <thead>
+                        <tr class="text-muted small">
+                            <th>OS</th>
+                            <th>Identificador / Job</th>
+                            <th>Cliente</th>
+                            <th>Status</th>
+                            <th>Setor Anterior</th>
+                            <th class="text-end">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var os in ordens)
+                        {
+                            var temPermissao = TemPermissaoParaSetor(os.SetorAtual);
+                            <tr>
+                                <td class="fw-bold">#@os.NumeroOS</td>
+                                <td>@os.IdentificadorFluxo</td>
+                                <td>@os.NomeCliente</td>
+                                <td>
+                                    @if ((int)os.Status == 0)
+                                    {
+                                        <span class="badge bg-warning text-dark px-3 py-2">⏳ Aguardando Recebimento</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-success px-3 py-2">⚙️ Em Processamento</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (os.SetorAnterior.HasValue)
+                                    {
+                                        <span class="badge bg-light text-secondary border">↩️ @os.SetorAnterior</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">-</span>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    @if (!temPermissao)
+                                    {
+                                        <span class="badge bg-light text-muted border">🔒 Apenas Leitura</span>
+                                    }
+                                    else if ((int)os.Status == 0)
+                                    {
+                                        <button class="btn btn-sm btn-outline-success fw-bold me-2" @onclick="() => ReceberOS(os.Id)">
+                                            📥 Receber
+                                        </button>
+                                    }
+                                    else if (os.SetorAtual == SetorEnum.Financeiro)
+                                    {
+                                        <button class="btn btn-sm btn-success fw-bold" @onclick="() => ConcluirOS(os.Id)">
+                                            ✅ Concluir OS
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-primary fw-bold" @onclick="() => AbrirModalDespacho(os)">
+                                            🚀 Despachar
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <!-- Histórico de Concluídas -->
+    <div class="card border-0 shadow-sm rounded-4 p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="fw-bold mb-0 text-success">✅ Histórico de OSs Concluídas (Ordem Cronológica)</h6>
+            <span class="badge bg-light text-success border rounded-pill px-3">@ordensConcluidas.Count Finalizada(s)</span>
+        </div>
+
+        @if (!ordensConcluidas.Any())
+        {
+            <div class="text-center py-4 text-muted small">
+                Nenhuma Ordem de Serviço foi finalizada até o momento.
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr class="text-muted small">
+                            <th>OS</th>
+                            <th>Identificador / Job</th>
+                            <th>Cliente</th>
+                            <th>Setor Final</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var os in ordensConcluidas)
+                        {
+                            <tr>
+                                <td class="fw-bold text-dark">#@os.NumeroOS</td>
+                                <td>@os.IdentificadorFluxo</td>
+                                <td>@os.NomeCliente</td>
+                                <td><span class="badge bg-light text-dark border">@os.SetorAtual</span></td>
+                                <td><span class="badge bg-success px-3 py-2">✅ Concluída</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
 </div>
 
-@if (fluxos == null)
+<!-- Modal Despachar -->
+@if (osParaDespachar != null)
 {
-    <p><em>Carregando...</em></p>
-}
-else if (!fluxos.Any())
-{
-    <div class="alert alert-info">Nenhuma OS na fila deste setor.</div>
-}
-else
-{
-    <table class="table table-striped align-middle">
-        <thead>
-            <tr>
-                <th>OS</th>
-                <th>Fluxo</th>
-                <th>Status</th>
-                <th>Ações</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var f in fluxos)
-            {
-                <tr>
-                    <td><strong>@f.NumeroOS</strong></td>
-                    <td>@f.IdentificadorFluxo</td>
-                    <td><span class="badge bg-secondary">@f.Status</span></td>
-                    <td>
-                        @if (f.Status == StatusFluxo.AguardandoRecebimento)
-                        {
-                            <button class="btn btn-success btn-sm" @onclick="() => Receber(f.Id)">
-                                📥 Receber
-                            </button>
-                        }
-                        else if (f.Status == StatusFluxo.EmExecucao)
-                        {
-                            <div class="input-group">
-                                <select class="form-select form-select-sm" @bind="destinoSelecionado">
-                                    <option value="">Selecione o Destino...</option>
-                                    @foreach (var setor in Enum.GetValues<SetorEnum>())
-                                    {
-                                        <option value="@setor">@setor</option>
-                                    }
-                                </select>
-                                <button class="btn btn-primary btn-sm" @onclick="() => Despachar(f.Id)">
-                                    🚀 Despachar
-                                </button>
-                            </div>
-                        }
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content rounded-4 border-0">
+                <div class="modal-header border-0">
+                    <h5 class="modal-title fw-bold">Despachar OS #@osParaDespachar.NumeroOS</h5>
+                    <button type="button" class="btn-close" @onclick="FecharModalDespacho"></button>
+                </div>
+                <div class="modal-body py-0">
+                    <p class="text-muted small mb-3">Selecione o próximo setor de destino para esta Ordem de Serviço:</p>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-bold">SETOR DE DESTINO</label>
+                        <select class="form-select" @bind="setorDestinoSelecionado">
+                            @foreach (var dest in ObterDestinosValidos(osParaDespachar))
+                            {
+                                <option value="@dest">
+                                    @(osParaDespachar.SetorAnterior.HasValue && dest == osParaDespachar.SetorAnterior.Value ? $"↩️ Devolver para {dest}" : dest.ToString())
+                                </option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer border-0">
+                    <button class="btn btn-light" @onclick="FecharModalDespacho">Cancelar</button>
+                    <button class="btn btn-primary fw-bold" @onclick="ConfirmarDespacho">Confirmar Envio</button>
+                </div>
+            </div>
+        </div>
+    </div>
 }
 
 @code {
-    private SetorEnum setorAtual = SetorEnum.Impressao;
-    private SetorEnum? destinoSelecionado;
-    private List<FluxoResponseDto>? fluxos;
+    private SetorEnum setorSelecionado = SetorEnum.Vendas;
+    private List<FluxoResponseDto> ordens = new();
+    private List<FluxoResponseDto> ordensConcluidas = new();
+    private FluxoResponseDto? osParaDespachar;
+    private SetorEnum setorDestinoSelecionado;
+    private string mensagemErro = string.Empty;
+    private bool carregando = true;
+    private ClaimsPrincipal? usuarioLogado;
 
-    protected override async Task OnInitializedAsync() => await CarregarFila();
-
-    private async Task CarregarFila()
+    protected override async Task OnInitializedAsync()
     {
-        fluxos = await Http.GetFromJsonAsync<List<FluxoResponseDto>>($"api/Fluxos/fila-setor/{setorAtual}");
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        usuarioLogado = authState.User;
+        await CarregarTudo();
     }
 
-    private async Task Receber(Guid id)
+    private bool TemPermissaoParaSetor(SetorEnum setor)
     {
-        var dto = new ReceberFluxoDto(Guid.NewGuid());
-        await Http.PostAsJsonAsync($"api/Fluxos/{id}/receber", dto);
-        await CarregarFila();
+        if (usuarioLogado == null) return false;
+        if (usuarioLogado.IsInRole("Administrador")) return true;
+
+        var setorClaim = usuarioLogado.FindFirst("Setor")?.Value;
+        return setorClaim == setor.ToString();
     }
 
-    private async Task Despachar(Guid id)
+    private async Task AnexarTokenHeader()
     {
-        if (destinoSelecionado == null) return;
-        var dto = new DespacharFluxoDto(destinoSelecionado.Value, Guid.NewGuid());
-        await Http.PostAsJsonAsync($"api/Fluxos/{id}/despachar", dto);
-        await CarregarFila();
+        var token = await AuthStateProvider.GetTokenAsync();
+        if (!string.IsNullOrEmpty(token))
+        {
+            Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+    }
+
+    private async Task SelecionarSetor(SetorEnum setor)
+    {
+        setorSelecionado = setor;
+        await CarregarOrdens();
+    }
+
+    private async Task CarregarTudo()
+    {
+        await CarregarOrdens();
+        await CarregarConcluidas();
+    }
+
+    private async Task CarregarOrdens()
+    {
+        carregando = true;
+        mensagemErro = string.Empty;
+        try
+        {
+            await AnexarTokenHeader();
+            var res = await Http.GetAsync($"api/Fluxos/setor/{(int)setorSelecionado}");
+            if (res.IsSuccessStatusCode)
+            {
+                ordens = await res.Content.ReadFromJsonAsync<List<FluxoResponseDto>>() ?? new();
+            }
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Erro de conexão: {ex.Message}";
+        }
+        finally
+        {
+            carregando = false;
+        }
+    }
+
+    private async Task CarregarConcluidas()
+    {
+        try
+        {
+            await AnexarTokenHeader();
+            var res = await Http.GetAsync("api/Fluxos/concluidas");
+            if (res.IsSuccessStatusCode)
+            {
+                ordensConcluidas = await res.Content.ReadFromJsonAsync<List<FluxoResponseDto>>() ?? new();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Erro ao carregar concluídas: {ex.Message}");
+        }
+    }
+
+    private async Task ReceberOS(Guid id)
+    {
+        try
+        {
+            await AnexarTokenHeader();
+            var res = await Http.PostAsync($"api/Fluxos/{id}/receber", null);
+            if (res.IsSuccessStatusCode)
+            {
+                await CarregarOrdens();
+            }
+            else
+            {
+                mensagemErro = await res.Content.ReadAsStringAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Falha ao receber: {ex.Message}";
+        }
+    }
+
+    private async Task ConcluirOS(Guid id)
+    {
+        try
+        {
+            await AnexarTokenHeader();
+            var res = await Http.PostAsync($"api/Fluxos/{id}/concluir", null);
+            if (res.IsSuccessStatusCode)
+            {
+                await CarregarTudo();
+            }
+            else
+            {
+                mensagemErro = await res.Content.ReadAsStringAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Falha ao concluir OS: {ex.Message}";
+        }
+    }
+
+    private void AbrirModalDespacho(FluxoResponseDto os)
+    {
+        osParaDespachar = os;
+        var destinos = ObterDestinosValidos(os);
+        if (destinos.Any())
+        {
+            setorDestinoSelecionado = destinos.First();
+        }
+    }
+
+    private void FecharModalDespacho()
+    {
+        osParaDespachar = null;
+    }
+
+    private async Task ConfirmarDespacho()
+    {
+        if (osParaDespachar == null) return;
+
+        try
+        {
+            await AnexarTokenHeader();
+            var dto = new { SetorDestino = setorDestinoSelecionado, UsuarioId = Guid.Empty };
+            var res = await Http.PostAsJsonAsync($"api/Fluxos/{osParaDespachar.Id}/despachar", dto);
+
+            if (res.IsSuccessStatusCode)
+            {
+                FecharModalDespacho();
+                await CarregarOrdens();
+            }
+            else
+            {
+                mensagemErro = await res.Content.ReadAsStringAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Falha ao despachar: {ex.Message}";
+        }
+    }
+
+    private List<SetorEnum> ObterDestinosValidos(FluxoResponseDto os)
+    {
+        SetorEnum[] baseDestinos = os.SetorAtual switch
+        {
+            SetorEnum.Vendas => new[] { SetorEnum.Criacao, SetorEnum.Recorte, SetorEnum.Impressao, SetorEnum.Preparacao, SetorEnum.Frota, SetorEnum.Acabamento },
+            SetorEnum.Criacao => new[] { SetorEnum.Recorte, SetorEnum.Impressao, SetorEnum.Preparacao, SetorEnum.Frota, SetorEnum.Acabamento },
+            SetorEnum.Impressao => new[] { SetorEnum.Recorte, SetorEnum.Preparacao, SetorEnum.Frota, SetorEnum.Acabamento },
+            SetorEnum.Recorte => new[] { SetorEnum.Preparacao, SetorEnum.Frota, SetorEnum.Acabamento },
+            SetorEnum.Preparacao => new[] { SetorEnum.Frota },
+            SetorEnum.Acabamento => new[] { SetorEnum.Prateleira },
+            SetorEnum.Frota => new[] { SetorEnum.Patio },
+            SetorEnum.Prateleira => new[] { SetorEnum.Financeiro },
+            SetorEnum.Patio => new[] { SetorEnum.Financeiro },
+            _ => Array.Empty<SetorEnum>()
+        };
+
+        var destinos = new List<SetorEnum>(baseDestinos);
+
+        if (os.SetorAnterior.HasValue && !destinos.Contains(os.SetorAnterior.Value))
+        {
+            destinos.Add(os.SetorAnterior.Value);
+        }
+
+        return destinos;
     }
 }

@@ -1,40 +1,76 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.JSInterop;
 
 namespace SistemaOrdemServico.Web;
 
 public class CustomAuthStateProvider : AuthenticationStateProvider
 {
-    private ClaimsPrincipal _anonymous = new ClaimsPrincipal(new ClaimsIdentity());
-    private ClaimsPrincipal _currentUser;
+    private readonly IJSRuntime _jsRuntime;
+    private AuthenticationState _anonymous = new(new ClaimsPrincipal(new ClaimsIdentity()));
 
-    public CustomAuthStateProvider()
+    public CustomAuthStateProvider(IJSRuntime jsRuntime)
     {
-        _currentUser = _anonymous;
+        _jsRuntime = jsRuntime;
     }
 
-    public override Task<AuthenticationState> GetAuthenticationStateAsync()
+    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
-        return Task.FromResult(new AuthenticationState(_currentUser));
-    }
-
-    public void MarkUserAsAuthenticated(string email, string role, string setor, Guid usuarioId)
-    {
-        var identity = new ClaimsIdentity(new[]
+        try
         {
-            new Claim(ClaimTypes.Name, email),
-            new Claim(ClaimTypes.Role, role),
-            new Claim("Setor", setor),
-            new Claim("UsuarioId", usuarioId.ToString())
-        }, "CustomAuth");
+            var token = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", "authToken");
+            var email = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", "userEmail");
+            var setor = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", "userSetor");
+            var role = await _jsRuntime.InvokeAsync<string>("localStorage.getItem", "userRole");
 
-        _currentUser = new ClaimsPrincipal(identity);
+            if (string.IsNullOrWhiteSpace(token))
+                return _anonymous;
+
+            var claims = new List<Claim>
+            {
+                new(ClaimTypes.Name, email ?? "Usuario"),
+                new(ClaimTypes.Role, role ?? "Operador"),
+                new("Setor", setor ?? "Criacao")
+            };
+
+            var identity = new ClaimsIdentity(claims, "CustomAuth");
+            return new AuthenticationState(new ClaimsPrincipal(identity));
+        }
+        catch
+        {
+            return _anonymous;
+        }
+    }
+
+    public async Task MarkUserAsAuthenticated(string token, string email, string setor, string role)
+    {
+        await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "authToken", token);
+        await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "userEmail", email);
+        await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "userSetor", setor);
+        await _jsRuntime.InvokeVoidAsync("localStorage.setItem", "userRole", role);
+
         NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
     }
 
-    public void MarkUserAsLoggedOut()
+    public async Task MarkUserAsLoggedOut()
     {
-        _currentUser = _anonymous;
-        NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
+        await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "authToken");
+        await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "userEmail");
+        await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "userSetor");
+        await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", "userRole");
+
+        NotifyAuthenticationStateChanged(Task.FromResult(_anonymous));
+    }
+
+    public async Task<string?> GetTokenAsync()
+    {
+        try
+        {
+            return await _jsRuntime.InvokeAsync<string>("localStorage.getItem", "authToken");
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

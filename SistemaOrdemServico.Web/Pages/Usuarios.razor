@@ -1,0 +1,210 @@
+@page "/usuarios"
+@using Microsoft.AspNetCore.Authorization
+@using SistemaOrdemServico.Domain.Enums
+@using System.Net.Http.Headers
+@attribute [Authorize]
+@inject HttpClient Http
+@inject CustomAuthStateProvider AuthStateProvider
+
+<div class="container py-4">
+    <div class="d-flex align-items-center gap-2 mb-4">
+        <span class="fs-3">👥</span>
+        <div>
+            <h4 class="fw-bold mb-0" style="color: #0b2f6b;">Gestão de Funcionários</h4>
+            <span class="text-muted small">Cadastro e Atribuição de Setores</span>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-md-5">
+            <div class="card border-0 shadow-sm rounded-4 p-4">
+                <h6 class="fw-bold mb-3" style="color: #0b2f6b;">Cadastrar Novo Funcionário</h6>
+
+                @if (!string.IsNullOrEmpty(mensagemSucesso))
+                {
+                    <div class="alert alert-success py-2 px-3 small rounded-3 mb-3">
+                        ✅ @mensagemSucesso
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(mensagemErro))
+                {
+                    <div class="alert alert-danger py-2 px-3 small rounded-3 mb-3">
+                        ❌ @mensagemErro
+                    </div>
+                }
+
+                <EditForm Model="@novoUsuario" OnValidSubmit="@SalvarUsuario">
+                    <DataAnnotationsValidator />
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-bold">NOME DE USUÁRIO (ÚNICO)</label>
+                        <InputText class="form-control" @bind-Value="novoUsuario.Usuario" placeholder="Ex: joao.impressao" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-bold">SENHA DE ACESSO</label>
+                        <InputText type="password" class="form-control" @bind-Value="novoUsuario.Senha" placeholder="******" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-bold">SETOR ATRIBUÍDO</label>
+                        <InputSelect class="form-select" @bind-Value="novoUsuario.Setor">
+                            @foreach (var setor in Enum.GetValues<SetorEnum>())
+                            {
+                                <option value="@setor">@setor</option>
+                            }
+                        </InputSelect>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label text-muted small fw-bold">PERFIL</label>
+                        <InputSelect class="form-select" @bind-Value="novoUsuario.Role">
+                            <option value="Operador">Operador de Setor</option>
+                            <option value="Comercial">Comercial</option>
+                            <option value="Administrador">Administrador</option>
+                        </InputSelect>
+                    </div>
+
+                    <button type="submit" class="btn text-white fw-bold w-100 py-2 rounded-3" style="background-color: #0b2f6b;">
+                        + Cadastrar Funcionário
+                    </button>
+                </EditForm>
+            </div>
+        </div>
+
+        <div class="col-md-7">
+            <div class="card border-0 shadow-sm rounded-4 p-4">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="fw-bold mb-0" style="color: #0b2f6b;">Equipe Cadastrada</h6>
+                    <span class="badge bg-light text-primary border rounded-pill px-3">@usuarios.Count</span>
+                </div>
+
+                @if (carregando)
+                {
+                    <div class="text-center py-4">
+                        <div class="spinner-border text-primary" role="status"></div>
+                    </div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table align-middle">
+                            <thead>
+                                <tr class="text-muted small">
+                                    <th>Usuário</th>
+                                    <th>Setor</th>
+                                    <th>Perfil</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var u in usuarios)
+                                {
+                                    <tr>
+                                        <td class="fw-semibold">@u.Usuario</td>
+                                        <td><span class="badge bg-light text-dark border px-3 py-2">@u.Setor</span></td>
+                                        <td><span class="badge bg-primary px-3 py-2">@u.Role</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private NovoUsuarioModel novoUsuario = new();
+    private List<UsuarioResponseModel> usuarios = new();
+    private string mensagemSucesso = string.Empty;
+    private string mensagemErro = string.Empty;
+    private bool carregando = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CarregarUsuarios();
+    }
+
+    private async Task AnexarTokenHeader()
+    {
+        var token = await AuthStateProvider.GetTokenAsync();
+        if (!string.IsNullOrEmpty(token))
+        {
+            Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+    }
+
+    private async Task CarregarUsuarios()
+    {
+        carregando = true;
+        try
+        {
+            await AnexarTokenHeader();
+            var res = await Http.GetAsync("api/Auth/usuarios");
+            if (res.IsSuccessStatusCode)
+            {
+                usuarios = await res.Content.ReadFromJsonAsync<List<UsuarioResponseModel>>() ?? new();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Erro ao carregar usuários: {ex.Message}");
+        }
+        finally
+        {
+            carregando = false;
+        }
+    }
+
+    private async Task SalvarUsuario()
+    {
+        mensagemSucesso = string.Empty;
+        mensagemErro = string.Empty;
+
+        try
+        {
+            await AnexarTokenHeader();
+
+            var dto = new
+            {
+                Usuario = novoUsuario.Usuario,
+                Senha = novoUsuario.Senha,
+                Setor = novoUsuario.Setor.ToString(),
+                Role = novoUsuario.Role
+            };
+
+            var res = await Http.PostAsJsonAsync("api/Auth/usuarios", dto);
+            if (res.IsSuccessStatusCode)
+            {
+                mensagemSucesso = "Funcionário cadastrado com sucesso!";
+                novoUsuario = new();
+                await CarregarUsuarios();
+            }
+            else
+            {
+                mensagemErro = await res.Content.ReadAsStringAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Falha: {ex.Message}";
+        }
+    }
+
+    public class NovoUsuarioModel
+    {
+        public string Usuario { get; set; } = string.Empty;
+        public string Senha { get; set; } = string.Empty;
+        public SetorEnum Setor { get; set; } = SetorEnum.Criacao;
+        public string Role { get; set; } = "Operador";
+    }
+
+    public class UsuarioResponseModel
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Usuario { get; set; } = string.Empty;
+        public string Setor { get; set; } = string.Empty;
+        public string Role { get; set; } = string.Empty;
+    }
+}

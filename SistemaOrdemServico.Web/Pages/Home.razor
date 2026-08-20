@@ -1,32 +1,148 @@
 ﻿@page "/"
+@using SistemaOrdemServico.DTOs
+@using SistemaOrdemServico.Domain.Enums
+@using System.Net.Http.Headers
+@inject HttpClient Http
+@inject CustomAuthStateProvider AuthStateProvider
 
-<div class="container mt-4">
-    <h2>🛠️ OS Tracker - Painel de Controle</h2>
-    <p class="text-muted">Sistema de Rastreamento e Gestão de Fluxos Fabris</p>
+<!-- Hero Banner ADESIPAR -->
+<div class="rounded-4 p-4 p-md-5 mb-4 text-white shadow-sm" style="background-color: #0b2f6b;">
+    <div class="mb-2">
+        <span class="text-uppercase fw-bold text-warning small tracking-wider" style="letter-spacing: 1px;">
+            | SISTEMA INTEGRADO
+        </span>
+    </div>
+    <h1 class="display-5 fw-extrabold mb-1">OS Tracker</h1>
+    <h4 class="fw-bold text-warning mb-3">Painel de Controle</h4>
+    <p class="col-md-9 text-light opacity-75 mb-4">
+        Sistema de rastreamento e gestão de fluxos fabris da ADESIPAR Comunicação Visual. Controle completo do processo, do comercial à produção.
+    </p>
 
-    <div class="row mt-4 g-3">
-        <div class="col-md-4">
-            <div class="card p-3 border-primary shadow-sm h-100">
-                <h4>🔒 Acesso</h4>
-                <p>Realize o login para definir seu perfil e setor de atuação.</p>
-                <a href="login" class="btn btn-outline-primary mt-auto">Acessar Login</a>
+    <!-- Cards de Métricas / Indicadores -->
+    <div class="row g-3 pt-3 border-top border-white border-opacity-10 align-items-center">
+        <div class="col-6 col-md-3">
+            <div class="d-flex align-items-baseline gap-2">
+                <span class="display-6 fw-bold">@ordens.Count</span>
+                <span class="badge bg-danger rounded-pill">+3</span>
+                <span class="small text-light opacity-75">OSs Abertas Hoje</span>
             </div>
         </div>
-
-        <div class="col-md-4">
-            <div class="card p-3 border-info shadow-sm h-100">
-                <h4>👔 Comercial</h4>
-                <p>Abertura de novas OSs e encaminhamento para a fábrica.</p>
-                <a href="criar-fluxo" class="btn btn-primary mt-auto">➕ Nova OS</a>
+        <div class="col-6 col-md-3">
+            <div class="d-flex align-items-baseline gap-2">
+                <span class="display-6 fw-bold">@EmProducaoCount</span>
+                <span class="small text-light opacity-75">Em Produção</span>
             </div>
         </div>
-
-        <div class="col-md-4">
-            <div class="card p-3 border-success shadow-sm h-100">
-                <h4>🏭 Chão de Fábrica</h4>
-                <p>Consulte a fila do setor, receba e despache os materiais.</p>
-                <a href="fila" class="btn btn-success mt-auto">🏭 Fila do Setor</a>
+        <div class="col-6 col-md-3">
+            <div class="d-flex align-items-baseline gap-2">
+                <span class="display-6 fw-bold">5</span>
+                <span class="small text-light opacity-75">Concluídas Hoje</span>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="d-flex align-items-baseline gap-2">
+                <span class="display-6 fw-bold">4</span>
+                <span class="small text-light opacity-75">Setores Ativos</span>
             </div>
         </div>
     </div>
 </div>
+
+<!-- Tabela de Ordens em Andamento -->
+<div class="card border-0 shadow-sm rounded-4 p-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h5 class="fw-bold mb-0" style="color: #0b2f6b;">Ordens em Andamento</h5>
+        <button class="btn btn-outline-primary btn-sm rounded-3 px-3 fw-semibold" @onclick="CarregarOrdens">
+            🔄 Atualizar
+        </button>
+    </div>
+
+    @if (carregando)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+        </div>
+    }
+    else if (ordens == null || !ordens.Any())
+    {
+        <div class="text-center py-5 text-muted small">
+            Nenhuma ordem de serviço cadastrada no momento.
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead class="text-muted small fw-bold">
+                    <tr>
+                        <th>Nº OS</th>
+                        <th>FLUXO</th>
+                        <th>CLIENTE</th>
+                        <th>SETOR</th>
+                        <th>STATUS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var os in ordens)
+                    {
+                        var statusInt = Convert.ToInt32(os.Status);
+                        var emProcesso = statusInt == 1 || os.Status.ToString().Contains("Processo") || os.Status.ToString().Contains("Execucao");
+
+                        <tr>
+                            <td class="fw-bold text-primary">@os.NumeroOS</td>
+                            <td>@os.IdentificadorFluxo</td>
+                            <td>@(string.IsNullOrWhiteSpace(os.NomeCliente) ? "N/I" : os.NomeCliente)</td>
+                            <td>
+                                <span class="badge bg-light text-dark border px-3 py-2">@os.SetorAtual</span>
+                            </td>
+                            <td>
+                                <span class="badge rounded-pill @(emProcesso ? "bg-primary text-white" : "bg-light text-muted border") px-3 py-2">
+                                    @(emProcesso ? "● Em processo" : "Aguardando")
+                                </span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private List<FluxoResponseDto> ordens = new();
+    private bool carregando = true;
+
+    private int EmProducaoCount => ordens.Count(o => Convert.ToInt32(o.Status) == 1 || o.Status.ToString().Contains("Processo") || o.Status.ToString().Contains("Execucao"));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CarregarOrdens();
+    }
+
+    private async Task CarregarOrdens()
+    {
+        carregando = true;
+        try
+        {
+            var token = await AuthStateProvider.GetTokenAsync();
+            if (!string.IsNullOrEmpty(token))
+            {
+                Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+
+            var res = await Http.GetAsync("api/Fluxos");
+            if (res.IsSuccessStatusCode)
+            {
+                ordens = await res.Content.ReadFromJsonAsync<List<FluxoResponseDto>>() ?? new();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Erro ao carregar ordens: {ex.Message}");
+        }
+        finally
+        {
+            carregando = false;
+        }
+    }
+}

@@ -1,0 +1,49 @@
+@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+@inject CustomAuthStateProvider AuthStateProvider
+@inject NavigationManager Nav
+
+<CascadingAuthenticationState>
+    <div class="page">
+        <div class="main">
+            <header class="navbar navbar-expand-lg navbar-dark px-4 shadow-sm" style="background-color: #0b2f6b;">
+                <a class="navbar-brand fw-bold fs-5" href="">⚙️ Sistema OS Tracker</a>
+                
+                <div class="d-flex align-items-center gap-2 ms-auto">
+                    <a href="" class="btn btn-outline-light btn-sm">🏠 Início</a>
+                    <a href="nova-os" class="btn btn-outline-light btn-sm">📋 Nova OS</a>
+                    <a href="fila-setor" class="btn btn-outline-light btn-sm">🏭 Fila de Produção</a>
+                    <a href="usuarios" class="btn btn-outline-light btn-sm">👥 Funcionários</a>
+
+                    <AuthorizeView>
+                        <Authorized>
+                            <span class="badge bg-light text-primary px-3 py-2 fw-semibold ms-2">
+                                👤 @context.User.Identity?.Name
+                            </span>
+                            <button class="btn btn-danger btn-sm fw-bold px-3 ms-1" @onclick="FazerLogout">
+                                Sair
+                            </button>
+                        </Authorized>
+                        <NotAuthorized>
+                            <a href="login" class="btn btn-light text-primary btn-sm fw-bold px-3 ms-2">
+                                🔑 Entrar
+                            </a>
+                        </NotAuthorized>
+                    </AuthorizeView>
+                </div>
+            </header>
+
+            <article class="content px-4 py-3">
+                @Body
+            </article>
+        </div>
+    </div>
+</CascadingAuthenticationState>
+
+@code {
+    private async Task FazerLogout()
+    {
+        await AuthStateProvider.MarkUserAsLoggedOut();
+        Nav.NavigateTo("login");
+    }
+}
