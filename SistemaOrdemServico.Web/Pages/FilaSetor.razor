@@ -74,6 +74,7 @@
                         @foreach (var os in ordens)
                         {
                             var temPermissao = TemPermissaoParaSetor(os.SetorAtual);
+                            var podeCancelar = PodeCancelarOS();
                             <tr>
                                 <td class="fw-bold">#@os.NumeroOS</td>
                                 <td>@os.IdentificadorFluxo</td>
@@ -99,6 +100,13 @@
                                     }
                                 </td>
                                 <td class="text-end">
+                                    @if (podeCancelar)
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger me-2" @onclick="() => CancelarOS(os.Id)">
+                                            🚫 Cancelar
+                                        </button>
+                                    }
+
                                     @if (!temPermissao)
                                     {
                                         <span class="badge bg-light text-muted border">🔒 Apenas Leitura</span>
@@ -230,7 +238,18 @@
         if (usuarioLogado.IsInRole("Administrador")) return true;
 
         var setorClaim = usuarioLogado.FindFirst("Setor")?.Value;
+        if (setorClaim == "Comercial" || setorClaim == "Vendas") return true;
+
         return setorClaim == setor.ToString();
+    }
+
+    private bool PodeCancelarOS()
+    {
+        if (usuarioLogado == null) return false;
+        if (usuarioLogado.IsInRole("Administrador")) return true;
+
+        var setorClaim = usuarioLogado.FindFirst("Setor")?.Value;
+        return setorClaim == "Comercial" || setorClaim == "Vendas";
     }
 
     private async Task AnexarTokenHeader()
@@ -333,6 +352,27 @@
         catch (Exception ex)
         {
             mensagemErro = $"Falha ao concluir OS: {ex.Message}";
+        }
+    }
+
+    private async Task CancelarOS(Guid id)
+    {
+        try
+        {
+            await AnexarTokenHeader();
+            var res = await Http.DeleteAsync($"api/Fluxos/{id}/cancelar");
+            if (res.IsSuccessStatusCode)
+            {
+                await CarregarOrdens();
+            }
+            else
+            {
+                mensagemErro = await res.Content.ReadAsStringAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Falha ao cancelar OS: {ex.Message}";
         }
     }
 

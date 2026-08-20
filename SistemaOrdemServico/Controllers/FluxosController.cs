@@ -52,15 +52,26 @@ public class FluxosController : ControllerBase
     private bool ValidarPermissaoSetor(SetorEnum setorRequerido)
     {
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        if (role == "Administrador") return true;
-
         var setorUsuarioClaim = User.FindFirst("Setor")?.Value;
+
+        // Administrador e Comercial movimentam livremente
+        if (role == "Administrador" || setorUsuarioClaim == "Comercial" || setorUsuarioClaim == "Vendas") 
+            return true;
+
         if (Enum.TryParse<SetorEnum>(setorUsuarioClaim, out var setorUsuario))
         {
             return setorUsuario == setorRequerido;
         }
 
         return true;
+    }
+
+    private bool PodeCancelarOS()
+    {
+        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        var setorUsuarioClaim = User.FindFirst("Setor")?.Value;
+
+        return role == "Administrador" || setorUsuarioClaim == "Comercial" || setorUsuarioClaim == "Vendas";
     }
 
     [HttpGet]
@@ -233,6 +244,22 @@ public class FluxosController : ControllerBase
         var linhasAfetadas = command.ExecuteNonQuery();
         if (linhasAfetadas == 0) 
             return BadRequest("Não foi possível concluir. Apenas OSs no setor Financeiro podem ser finalizadas.");
+
+        return Ok();
+    }
+
+    [HttpDelete("{id}/cancelar")]
+    public IActionResult Cancelar(Guid id)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM FluxosTabela WHERE Id = @id;";
+        command.Parameters.AddWithValue("@id", id.ToString());
+
+        var linhasAfetadas = command.ExecuteNonQuery();
+        if (linhasAfetadas == 0) return NotFound("OS não encontrada.");
 
         return Ok();
     }
