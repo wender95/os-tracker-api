@@ -24,160 +24,176 @@
         </div>
     }
 
-    <!-- Navegação de Setores -->
+    <!-- Navegação de Setores + Aba de Concluídas -->
     <ul class="nav nav-pills mb-4 gap-2">
         @foreach (var setor in Enum.GetValues<SetorEnum>())
         {
             <li class="nav-item">
-                <button class="nav-link px-3 py-2 rounded-3 @(setorSelecionado == setor ? "active fw-bold" : "bg-white text-dark border")" 
+                <button class="nav-link px-3 py-2 rounded-3 @(setorSelecionado == setor && !exibindoConcluidas ? "active fw-bold" : "bg-white text-dark border")" 
                         @onclick="() => SelecionarSetor(setor)">
                     @setor
                 </button>
             </li>
         }
+        <li class="nav-item">
+            <button class="nav-link px-3 py-2 rounded-3 @(exibindoConcluidas ? "btn-success active text-white fw-bold" : "bg-white text-success border border-success")" 
+                    @onclick="SelecionarAbaConcluidas">
+                ✅ Concluídas
+            </button>
+        </li>
     </ul>
 
-    <!-- Listagem Ativa -->
-    <div class="card border-0 shadow-sm rounded-4 p-4 mb-4">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h6 class="fw-bold mb-0" style="color: #0b2f6b;">Setor Atual: @setorSelecionado</h6>
-            <span class="badge bg-light text-primary border rounded-pill px-3">@ordens.Count OS(s) em aberto</span>
-        </div>
-
-        @if (carregando)
-        {
-            <div class="text-center py-5">
-                <div class="spinner-border text-primary" role="status"></div>
-            </div>
-        }
-        else if (!ordens.Any())
-        {
-            <div class="text-center py-5 text-muted">
-                Nenhuma Ordem de Serviço em aberto no setor <strong>@setorSelecionado</strong>.
-            </div>
-        }
-        else
-        {
-            <div class="table-responsive">
-                <table class="table align-middle">
-                    <thead>
-                        <tr class="text-muted small">
-                            <th>OS</th>
-                            <th>Identificador / Job</th>
-                            <th>Cliente</th>
-                            <th>Status</th>
-                            <th>Setor Anterior</th>
-                            <th class="text-end">Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var os in ordens)
-                        {
-                            var temPermissao = TemPermissaoParaSetor(os.SetorAtual);
-                            var podeCancelar = PodeCancelarOS();
-                            <tr>
-                                <td class="fw-bold">#@os.NumeroOS</td>
-                                <td>@os.IdentificadorFluxo</td>
-                                <td>@os.NomeCliente</td>
-                                <td>
-                                    @if ((int)os.Status == 0)
-                                    {
-                                        <span class="badge bg-warning text-dark px-3 py-2">⏳ Aguardando Recebimento</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="badge bg-success px-3 py-2">⚙️ Em Processamento</span>
-                                    }
-                                </td>
-                                <td>
-                                    @if (os.SetorAnterior.HasValue)
-                                    {
-                                        <span class="badge bg-light text-secondary border">↩️ @os.SetorAnterior</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="text-muted small">-</span>
-                                    }
-                                </td>
-                                <td class="text-end">
-                                    @if (podeCancelar)
-                                    {
-                                        <button class="btn btn-sm btn-outline-danger me-2" @onclick="() => CancelarOS(os.Id)">
-                                            🚫 Cancelar
-                                        </button>
-                                    }
-
-                                    @if (!temPermissao)
-                                    {
-                                        <span class="badge bg-light text-muted border">🔒 Apenas Leitura</span>
-                                    }
-                                    else if ((int)os.Status == 0)
-                                    {
-                                        <button class="btn btn-sm btn-outline-success fw-bold me-2" @onclick="() => ReceberOS(os.Id)">
-                                            📥 Receber
-                                        </button>
-                                    }
-                                    else if (os.SetorAtual == SetorEnum.Financeiro)
-                                    {
-                                        <button class="btn btn-sm btn-success fw-bold" @onclick="() => ConcluirOS(os.Id)">
-                                            ✅ Concluir OS
-                                        </button>
-                                    }
-                                    else
-                                    {
-                                        <button class="btn btn-sm btn-primary fw-bold" @onclick="() => AbrirModalDespacho(os)">
-                                            🚀 Despachar
-                                        </button>
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
-    </div>
-
-    <!-- Histórico de Concluídas -->
+    <!-- Card Principal -->
     <div class="card border-0 shadow-sm rounded-4 p-4">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h6 class="fw-bold mb-0 text-success">✅ Histórico de OSs Concluídas (Ordem Cronológica)</h6>
-            <span class="badge bg-light text-success border rounded-pill px-3">@ordensConcluidas.Count Finalizada(s)</span>
-        </div>
-
-        @if (!ordensConcluidas.Any())
+        @if (exibindoConcluidas)
         {
-            <div class="text-center py-4 text-muted small">
-                Nenhuma Ordem de Serviço foi finalizada até o momento.
+            <!-- VISUALIZAÇÃO DA ABA CONCLUÍDAS -->
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="fw-bold mb-0 text-success">✅ Histórico de OSs Concluídas (Ordem Cronológica)</h6>
+                <span class="badge bg-light text-success border rounded-pill px-3">@ordensConcluidas.Count Finalizada(s)</span>
             </div>
+
+            @if (carregando)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-success" role="status"></div>
+                </div>
+            }
+            else if (!ordensConcluidas.Any())
+            {
+                <div class="text-center py-5 text-muted">
+                    Nenhuma Ordem de Serviço foi finalizada até o momento.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr class="text-muted small">
+                                <th>OS</th>
+                                <th>Identificador / Job</th>
+                                <th>Cliente</th>
+                                <th>Setor Final</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var os in ordensConcluidas)
+                            {
+                                <tr>
+                                    <td class="fw-bold text-dark">#@os.NumeroOS</td>
+                                    <td>@os.IdentificadorFluxo</td>
+                                    <td>@os.NomeCliente</td>
+                                    <td><span class="badge bg-light text-dark border">@os.SetorAtual</span></td>
+                                    <td><span class="badge bg-success px-3 py-2">✅ Concluída</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
         }
         else
         {
-            <div class="table-responsive">
-                <table class="table table-hover align-middle">
-                    <thead>
-                        <tr class="text-muted small">
-                            <th>OS</th>
-                            <th>Identificador / Job</th>
-                            <th>Cliente</th>
-                            <th>Setor Final</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var os in ordensConcluidas)
-                        {
-                            <tr>
-                                <td class="fw-bold text-dark">#@os.NumeroOS</td>
-                                <td>@os.IdentificadorFluxo</td>
-                                <td>@os.NomeCliente</td>
-                                <td><span class="badge bg-light text-dark border">@os.SetorAtual</span></td>
-                                <td><span class="badge bg-success px-3 py-2">✅ Concluída</span></td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
+            <!-- VISUALIZAÇÃO DOS SETORES ATIVOS -->
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="fw-bold mb-0" style="color: #0b2f6b;">Setor Atual: @setorSelecionado</h6>
+                <span class="badge bg-light text-primary border rounded-pill px-3">@ordens.Count OS(s) em aberto</span>
             </div>
+
+            @if (carregando)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                </div>
+            }
+            else if (!ordens.Any())
+            {
+                <div class="text-center py-5 text-muted">
+                    Nenhuma Ordem de Serviço em aberto no setor <strong>@setorSelecionado</strong>.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table align-middle">
+                        <thead>
+                            <tr class="text-muted small">
+                                <th>OS</th>
+                                <th>Identificador / Job</th>
+                                <th>Cliente</th>
+                                <th>Status</th>
+                                <th>Setor Anterior</th>
+                                <th class="text-end">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var os in ordens)
+                            {
+                                var temPermissao = TemPermissaoParaSetor(os.SetorAtual);
+                                var podeCancelar = PodeCancelarOS();
+                                <tr>
+                                    <td class="fw-bold">#@os.NumeroOS</td>
+                                    <td>@os.IdentificadorFluxo</td>
+                                    <td>@os.NomeCliente</td>
+                                    <td>
+                                        @if ((int)os.Status == 0)
+                                        {
+                                            <span class="badge bg-warning text-dark px-3 py-2">⏳ Aguardando Recebimento</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-success px-3 py-2">⚙️ Em Processamento</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (os.SetorAnterior.HasValue)
+                                        {
+                                            <span class="badge bg-light text-secondary border">↩️ @os.SetorAnterior</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">-</span>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        @if (podeCancelar)
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger me-2" @onclick="() => CancelarOS(os.Id)">
+                                                🚫 Cancelar
+                                            </button>
+                                        }
+
+                                        @if (!temPermissao)
+                                        {
+                                            <span class="badge bg-light text-muted border">🔒 Apenas Leitura</span>
+                                        }
+                                        else if ((int)os.Status == 0)
+                                        {
+                                            <button class="btn btn-sm btn-outline-success fw-bold me-2" @onclick="() => ReceberOS(os.Id)">
+                                                📥 Receber
+                                            </button>
+                                        }
+                                        else if (os.SetorAtual == SetorEnum.Financeiro)
+                                        {
+                                            <button class="btn btn-sm btn-success fw-bold" @onclick="() => ConcluirOS(os.Id)">
+                                                ✅ Concluir OS
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-primary fw-bold" @onclick="() => AbrirModalDespacho(os)">
+                                                🚀 Despachar
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
         }
     </div>
 </div>
@@ -217,6 +233,7 @@
 
 @code {
     private SetorEnum setorSelecionado = SetorEnum.Vendas;
+    private bool exibindoConcluidas = false;
     private List<FluxoResponseDto> ordens = new();
     private List<FluxoResponseDto> ordensConcluidas = new();
     private FluxoResponseDto? osParaDespachar;
@@ -229,7 +246,7 @@
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         usuarioLogado = authState.User;
-        await CarregarTudo();
+        await CarregarOrdens();
     }
 
     private bool TemPermissaoParaSetor(SetorEnum setor)
@@ -263,13 +280,14 @@
 
     private async Task SelecionarSetor(SetorEnum setor)
     {
+        exibindoConcluidas = false;
         setorSelecionado = setor;
         await CarregarOrdens();
     }
 
-    private async Task CarregarTudo()
+    private async Task SelecionarAbaConcluidas()
     {
-        await CarregarOrdens();
+        exibindoConcluidas = true;
         await CarregarConcluidas();
     }
 
@@ -298,6 +316,8 @@
 
     private async Task CarregarConcluidas()
     {
+        carregando = true;
+        mensagemErro = string.Empty;
         try
         {
             await AnexarTokenHeader();
@@ -309,7 +329,11 @@
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Erro ao carregar concluídas: {ex.Message}");
+            mensagemErro = $"Erro ao carregar concluídas: {ex.Message}";
+        }
+        finally
+        {
+            carregando = false;
         }
     }
 
@@ -342,7 +366,7 @@
             var res = await Http.PostAsync($"api/Fluxos/{id}/concluir", null);
             if (res.IsSuccessStatusCode)
             {
-                await CarregarTudo();
+                await CarregarOrdens();
             }
             else
             {
@@ -363,7 +387,10 @@
             var res = await Http.DeleteAsync($"api/Fluxos/{id}/cancelar");
             if (res.IsSuccessStatusCode)
             {
-                await CarregarOrdens();
+                if (exibindoConcluidas)
+                    await CarregarConcluidas();
+                else
+                    await CarregarOrdens();
             }
             else
             {
