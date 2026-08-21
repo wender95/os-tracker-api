@@ -26,3 +26,10 @@ public class FluxoResponseDto
     public SetorEnum? SetorAnterior { get; set; }
     public StatusFluxo Status { get; set; }
 }
+
+public class EditarFluxoDto
+{
+    public string NumeroOS { get; set; } = string.Empty;
+    public string IdentificadorFluxo { get; set; } = string.Empty;
+    public string NomeCliente { get; set; } = string.Empty;
+}

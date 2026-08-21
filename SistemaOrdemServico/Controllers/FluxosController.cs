@@ -246,23 +246,7 @@ public class FluxosController : ControllerBase
             return BadRequest("Não foi possível concluir. Apenas OSs no setor Financeiro podem ser finalizadas.");
 
         return Ok();
-    }
-
-    [HttpDelete("{id}/cancelar")]
-    public IActionResult Cancelar(Guid id)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-
-        var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM FluxosTabela WHERE Id = @id;";
-        command.Parameters.AddWithValue("@id", id.ToString());
-
-        var linhasAfetadas = command.ExecuteNonQuery();
-        if (linhasAfetadas == 0) return NotFound("OS não encontrada.");
-
-        return Ok();
-    }
+    }  
 
     private bool ValidarTransicaoSetor(SetorEnum origem, SetorEnum destino, SetorEnum? setorAnterior)
     {
@@ -301,4 +285,79 @@ public class FluxosController : ControllerBase
             Status = (StatusFluxo)reader.GetInt32(6)
         };
     }
+
+        [HttpPut("{id}")]
+    public IActionResult Editar(Guid id, [FromBody] EditarFluxoDto dto)
+    {
+        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        var setorUsuarioClaim = User.FindFirst("Setor")?.Value;
+
+        if (role != "Administrador" && setorUsuarioClaim != "Comercial" && setorUsuarioClaim != "Vendas")
+        {
+            return StatusCode(403, "Acesso negado: Apenas Administrador e Comercial podem editar a OS.");
+        }
+
+        if (dto == null || string.IsNullOrWhiteSpace(dto.NumeroOS))
+        {
+            return BadRequest("Dados inválidos para edição.");
+        }
+
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        // Bloqueia se a OS estiver Concluída (Status = 2)
+        var selectCmd = connection.CreateCommand();
+        selectCmd.CommandText = "SELECT Status FROM FluxosTabela WHERE Id = @id;";
+        selectCmd.Parameters.AddWithValue("@id", id.ToString());
+        var statusObj = selectCmd.ExecuteScalar();
+
+        if (statusObj == null) return NotFound("OS não encontrada.");
+        if (Convert.ToInt32(statusObj) == 2)
+        {
+            return BadRequest("Ordens de Serviço concluídas não podem ser alteradas.");
+        }
+
+        var command = connection.CreateCommand();
+        command.CommandText = @"
+            UPDATE FluxosTabela 
+            SET NumeroOS = @numeroOS, 
+                IdentificadorFluxo = @identificadorFluxo, 
+                NomeCliente = @nomeCliente 
+            WHERE Id = @id;";
+
+        command.Parameters.AddWithValue("@id", id.ToString());
+        command.Parameters.AddWithValue("@numeroOS", dto.NumeroOS.Trim());
+        command.Parameters.AddWithValue("@identificadorFluxo", dto.IdentificadorFluxo?.Trim() ?? "");
+        command.Parameters.AddWithValue("@nomeCliente", dto.NomeCliente?.Trim() ?? "");
+
+        command.ExecuteNonQuery();
+        return Ok();
+    }
+
+    [HttpDelete("{id}/cancelar")]
+    public IActionResult Cancelar(Guid id)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        // Bloqueia se a OS estiver Concluída (Status = 2)
+        var selectCmd = connection.CreateCommand();
+        selectCmd.CommandText = "SELECT Status FROM FluxosTabela WHERE Id = @id;";
+        selectCmd.Parameters.AddWithValue("@id", id.ToString());
+        var statusObj = selectCmd.ExecuteScalar();
+
+        if (statusObj == null) return NotFound("OS não encontrada.");
+        if (Convert.ToInt32(statusObj) == 2)
+        {
+            return BadRequest("Ordens de Serviço concluídas não podem ser canceladas.");
+        }
+
+        var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM FluxosTabela WHERE Id = @id;";
+        command.Parameters.AddWithValue("@id", id.ToString());
+
+        command.ExecuteNonQuery();
+        return Ok();
+    }
+    
 }

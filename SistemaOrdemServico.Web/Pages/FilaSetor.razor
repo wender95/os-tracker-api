@@ -47,7 +47,6 @@
     <div class="card border-0 shadow-sm rounded-4 p-4">
         @if (exibindoConcluidas)
         {
-            <!-- VISUALIZAÇÃO DA ABA CONCLUÍDAS -->
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h6 class="fw-bold mb-0 text-success">✅ Histórico de OSs Concluídas (Ordem Cronológica)</h6>
                 <span class="badge bg-light text-success border rounded-pill px-3">@ordensConcluidas.Count Finalizada(s)</span>
@@ -96,7 +95,6 @@
         }
         else
         {
-            <!-- VISUALIZAÇÃO DOS SETORES ATIVOS -->
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h6 class="fw-bold mb-0" style="color: #0b2f6b;">Setor Atual: @setorSelecionado</h6>
                 <span class="badge bg-light text-primary border rounded-pill px-3">@ordens.Count OS(s) em aberto</span>
@@ -132,7 +130,7 @@
                             @foreach (var os in ordens)
                             {
                                 var temPermissao = TemPermissaoParaSetor(os.SetorAtual);
-                                var podeCancelar = PodeCancelarOS();
+                                var podeEditarECancelar = PodeEditarOuCancelarOS();
                                 <tr>
                                     <td class="fw-bold">#@os.NumeroOS</td>
                                     <td>@os.IdentificadorFluxo</td>
@@ -158,8 +156,11 @@
                                         }
                                     </td>
                                     <td class="text-end">
-                                        @if (podeCancelar)
+                                        @if (podeEditarECancelar)
                                         {
+                                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => AbrirModalEdicao(os)">
+                                                ✏️ Editar
+                                            </button>
                                             <button class="btn btn-sm btn-outline-danger me-2" @onclick="() => CancelarOS(os.Id)">
                                                 🚫 Cancelar
                                             </button>
@@ -197,6 +198,39 @@
         }
     </div>
 </div>
+
+<!-- Modal de Edição de OS -->
+@if (osParaEditar != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content rounded-4 border-0">
+                <div class="modal-header border-0">
+                    <h5 class="modal-title fw-bold">✏️ Editar Ordem de Serviço</h5>
+                    <button type="button" class="btn-close" @onclick="FecharModalEdicao"></button>
+                </div>
+                <div class="modal-body py-0">
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-bold">NÚMERO DA OS</label>
+                        <input type="text" class="form-control" @bind="osParaEditar.NumeroOS" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-bold">IDENTIFICADOR / JOB</label>
+                        <input type="text" class="form-control" @bind="osParaEditar.IdentificadorFluxo" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-muted small fw-bold">NOME DO CLIENTE</label>
+                        <input type="text" class="form-control" @bind="osParaEditar.NomeCliente" />
+                    </div>
+                </div>
+                <div class="modal-footer border-0">
+                    <button class="btn btn-light" @onclick="FecharModalEdicao">Cancelar</button>
+                    <button class="btn btn-primary fw-bold" @onclick="SalvarEdicaoOS">Salvar Alterações</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 <!-- Modal Despachar -->
 @if (osParaDespachar != null)
@@ -237,6 +271,7 @@
     private List<FluxoResponseDto> ordens = new();
     private List<FluxoResponseDto> ordensConcluidas = new();
     private FluxoResponseDto? osParaDespachar;
+    private FluxoResponseDto? osParaEditar;
     private SetorEnum setorDestinoSelecionado;
     private string mensagemErro = string.Empty;
     private bool carregando = true;
@@ -260,7 +295,7 @@
         return setorClaim == setor.ToString();
     }
 
-    private bool PodeCancelarOS()
+    private bool PodeEditarOuCancelarOS()
     {
         if (usuarioLogado == null) return false;
         if (usuarioLogado.IsInRole("Administrador")) return true;
@@ -337,6 +372,53 @@
         }
     }
 
+    private void AbrirModalEdicao(FluxoResponseDto os)
+    {
+        osParaEditar = new FluxoResponseDto
+        {
+            Id = os.Id,
+            NumeroOS = os.NumeroOS,
+            IdentificadorFluxo = os.IdentificadorFluxo,
+            NomeCliente = os.NomeCliente
+        };
+    }
+
+    private void FecharModalEdicao()
+    {
+        osParaEditar = null;
+    }
+
+    private async Task SalvarEdicaoOS()
+    {
+        if (osParaEditar == null) return;
+
+        try
+        {
+            await AnexarTokenHeader();
+            var dto = new 
+            { 
+                NumeroOS = osParaEditar.NumeroOS, 
+                IdentificadorFluxo = osParaEditar.IdentificadorFluxo, 
+                NomeCliente = osParaEditar.NomeCliente 
+            };
+
+            var res = await Http.PutAsJsonAsync($"api/Fluxos/{osParaEditar.Id}", dto);
+            if (res.IsSuccessStatusCode)
+            {
+                FecharModalEdicao();
+                await CarregarOrdens();
+            }
+            else
+            {
+                mensagemErro = await res.Content.ReadAsStringAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Falha ao editar OS: {ex.Message}";
+        }
+    }
+
     private async Task ReceberOS(Guid id)
     {
         try
@@ -387,10 +469,7 @@
             var res = await Http.DeleteAsync($"api/Fluxos/{id}/cancelar");
             if (res.IsSuccessStatusCode)
             {
-                if (exibindoConcluidas)
-                    await CarregarConcluidas();
-                else
-                    await CarregarOrdens();
+                await CarregarOrdens();
             }
             else
             {
