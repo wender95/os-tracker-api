@@ -24,6 +24,7 @@ public class FluxosController : ControllerBase
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
         
+        // Tabela Principal de Fluxos
         var command = connection.CreateCommand();
         command.CommandText = @"
             CREATE TABLE IF NOT EXISTS FluxosTabela (
@@ -33,45 +34,82 @@ public class FluxosController : ControllerBase
                 NomeCliente TEXT,
                 SetorAtual INTEGER,
                 SetorAnterior INTEGER NULL,
-                Status INTEGER
+                Status INTEGER,
+                DataCriacao DATETIME,
+                DataConclusao DATETIME NULL,
+                UsuarioCriacao TEXT
             );";
         command.ExecuteNonQuery();
 
+        // Tabela de Logs/Histórico para Alimentação de BI
+        var cmdHistorico = connection.CreateCommand();
+        cmdHistorico.CommandText = @"
+            CREATE TABLE IF NOT EXISTS HistoricoMovimentacoes (
+                Id TEXT PRIMARY KEY,
+                FluxoId TEXT,
+                NumeroOS TEXT,
+                SetorOrigem INTEGER NULL,
+                SetorDestino INTEGER,
+                Acao TEXT, -- 'CRIADA', 'RECEBIDA', 'DESPACHADA', 'CONCLUIDA', 'EDITADA', 'CANCELADA'
+                Usuario TEXT,
+                DataHora DATETIME
+            );";
+        cmdHistorico.ExecuteNonQuery();
+
+        // Migration simples para adicionar colunas se o banco já existia
+        TentarAdicionarColuna(connection, "FluxosTabela", "SetorAnterior INTEGER NULL");
+        TentarAdicionarColuna(connection, "FluxosTabela", "DataCriacao DATETIME");
+        TentarAdicionarColuna(connection, "FluxosTabela", "DataConclusao DATETIME NULL");
+        TentarAdicionarColuna(connection, "FluxosTabela", "UsuarioCriacao TEXT");
+    }
+
+    private void TentarAdicionarColuna(SqliteConnection connection, string tabela, string colunaDefinicao)
+    {
         try
         {
             var alterCmd = connection.CreateCommand();
-            alterCmd.CommandText = "ALTER TABLE FluxosTabela ADD COLUMN SetorAnterior INTEGER NULL;";
+            alterCmd.CommandText = $"ALTER TABLE {tabela} ADD COLUMN {colunaDefinicao};";
             alterCmd.ExecuteNonQuery();
         }
         catch
         {
-            // Coluna já existe
+            // Coluna já existe no SQLite
         }
     }
 
-    private bool ValidarPermissaoSetor(SetorEnum setorRequerido)
+    private string ObterNomeUsuarioLogado()
     {
-        var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        var setorUsuarioClaim = User.FindFirst("Setor")?.Value;
+        var nome = User.FindFirst(ClaimTypes.Name)?.Value 
+                ?? User.FindFirst(ClaimTypes.GivenName)?.Value 
+                ?? User.FindFirst("UniqueName")?.Value;
 
-        // Administrador e Comercial movimentam livremente
-        if (role == "Administrador" || setorUsuarioClaim == "Comercial" || setorUsuarioClaim == "Vendas") 
-            return true;
-
-        if (Enum.TryParse<SetorEnum>(setorUsuarioClaim, out var setorUsuario))
+        if (string.IsNullOrEmpty(nome))
         {
-            return setorUsuario == setorRequerido;
+            var setor = User.FindFirst("Setor")?.Value;
+            var role = User.FindFirst(ClaimTypes.Role)?.Value;
+            nome = !string.IsNullOrEmpty(setor) ? $"Usuário ({setor})" : (role ?? "Sistema");
         }
 
-        return true;
+        return nome;
     }
 
-    private bool PodeCancelarOS()
+    private void RegistrarHistorico(SqliteConnection connection, Guid fluxoId, string numeroOS, SetorEnum? setorOrigem, SetorEnum setorDestino, string acao, string usuario)
     {
-        var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        var setorUsuarioClaim = User.FindFirst("Setor")?.Value;
+        var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+            INSERT INTO HistoricoMovimentacoes (Id, FluxoId, NumeroOS, SetorOrigem, SetorDestino, Acao, Usuario, DataHora)
+            VALUES (@id, @fluxoId, @numeroOS, @setorOrigem, @setorDestino, @acao, @usuario, @dataHora);";
 
-        return role == "Administrador" || setorUsuarioClaim == "Comercial" || setorUsuarioClaim == "Vendas";
+        cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
+        cmd.Parameters.AddWithValue("@fluxoId", fluxoId.ToString());
+        cmd.Parameters.AddWithValue("@numeroOS", numeroOS);
+        cmd.Parameters.AddWithValue("@setorOrigem", setorOrigem.HasValue ? (object)(int)setorOrigem.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@setorDestino", (int)setorDestino);
+        cmd.Parameters.AddWithValue("@acao", acao);
+        cmd.Parameters.AddWithValue("@usuario", usuario);
+        cmd.Parameters.AddWithValue("@dataHora", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+        cmd.ExecuteNonQuery();
     }
 
     [HttpGet]
@@ -141,22 +179,29 @@ public class FluxosController : ControllerBase
         var numOS = dto.NumeroOS ?? string.Empty;
         var identFluxo = dto.IdentificadorFluxo ?? string.Empty;
         var nomeCliente = dto.NomeCliente ?? string.Empty;
+        var usuarioLogado = ObterNomeUsuarioLogado();
+        var dataAgora = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
 
         var command = connection.CreateCommand();
         command.CommandText = @"
-            INSERT INTO FluxosTabela (Id, NumeroOS, IdentificadorFluxo, NomeCliente, SetorAtual, SetorAnterior, Status)
-            VALUES (@id, @numeroOS, @identificadorFluxo, @nomeCliente, @setorAtual, NULL, 0);";
+            INSERT INTO FluxosTabela (Id, NumeroOS, IdentificadorFluxo, NomeCliente, SetorAtual, SetorAnterior, Status, DataCriacao, UsuarioCriacao)
+            VALUES (@id, @numeroOS, @identificadorFluxo, @nomeCliente, @setorAtual, NULL, 0, @dataCriacao, @usuarioCriacao);";
 
         command.Parameters.AddWithValue("@id", id.ToString());
         command.Parameters.AddWithValue("@numeroOS", numOS);
         command.Parameters.AddWithValue("@identificadorFluxo", identFluxo);
         command.Parameters.AddWithValue("@nomeCliente", nomeCliente);
         command.Parameters.AddWithValue("@setorAtual", (int)dto.SetorInicial);
+        command.Parameters.AddWithValue("@dataCriacao", dataAgora);
+        command.Parameters.AddWithValue("@usuarioCriacao", usuarioLogado);
 
         command.ExecuteNonQuery();
+
+        // Grava no Histórico para BI
+        RegistrarHistorico(connection, id, numOS, null, dto.SetorInicial, "CRIADA", usuarioLogado);
 
         return Ok(new FluxoResponseDto
         {
@@ -176,12 +221,28 @@ public class FluxosController : ControllerBase
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
 
+        var selectCmd = connection.CreateCommand();
+        selectCmd.CommandText = "SELECT NumeroOS, SetorAtual FROM FluxosTabela WHERE Id = @id;";
+        selectCmd.Parameters.AddWithValue("@id", id.ToString());
+
+        string numeroOS = "";
+        SetorEnum setorAtual;
+
+        using (var reader = selectCmd.ExecuteReader())
+        {
+            if (!reader.Read()) return NotFound("OS não encontrada.");
+            numeroOS = reader.GetString(0);
+            setorAtual = (SetorEnum)reader.GetInt32(1);
+        }
+
         var command = connection.CreateCommand();
         command.CommandText = "UPDATE FluxosTabela SET Status = 1 WHERE Id = @id;";
         command.Parameters.AddWithValue("@id", id.ToString());
+        command.ExecuteNonQuery();
 
-        var linhasAfetadas = command.ExecuteNonQuery();
-        if (linhasAfetadas == 0) return NotFound("OS não encontrada.");
+        var usuarioLogado = ObterNomeUsuarioLogado();
+        // Grava no Histórico para BI
+        RegistrarHistorico(connection, id, numeroOS, setorAtual, setorAtual, "RECEBIDA", usuarioLogado);
 
         return Ok();
     }
@@ -193,9 +254,10 @@ public class FluxosController : ControllerBase
         connection.Open();
 
         var selectCmd = connection.CreateCommand();
-        selectCmd.CommandText = "SELECT SetorAtual, SetorAnterior FROM FluxosTabela WHERE Id = @id;";
+        selectCmd.CommandText = "SELECT NumeroOS, SetorAtual, SetorAnterior FROM FluxosTabela WHERE Id = @id;";
         selectCmd.Parameters.AddWithValue("@id", id.ToString());
 
+        string numeroOS = "";
         SetorEnum setorAtual;
         SetorEnum? setorAnterior = null;
 
@@ -203,10 +265,11 @@ public class FluxosController : ControllerBase
         {
             if (!reader.Read()) return NotFound("OS não encontrada.");
 
-            setorAtual = (SetorEnum)reader.GetInt32(0);
-            if (!reader.IsDBNull(1))
+            numeroOS = reader.GetString(0);
+            setorAtual = (SetorEnum)reader.GetInt32(1);
+            if (!reader.IsDBNull(2))
             {
-                setorAnterior = (SetorEnum)reader.GetInt32(1);
+                setorAnterior = (SetorEnum)reader.GetInt32(2);
             }
         }
 
@@ -227,6 +290,11 @@ public class FluxosController : ControllerBase
         updateCmd.Parameters.AddWithValue("@setorDestino", (int)dto.SetorDestino);
 
         updateCmd.ExecuteNonQuery();
+
+        var usuarioLogado = ObterNomeUsuarioLogado();
+        // Grava no Histórico para BI
+        RegistrarHistorico(connection, id, numeroOS, setorAtual, dto.SetorDestino, "DESPACHADA", usuarioLogado);
+
         return Ok();
     }
 
@@ -236,17 +304,130 @@ public class FluxosController : ControllerBase
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
 
+        var selectCmd = connection.CreateCommand();
+        selectCmd.CommandText = "SELECT NumeroOS, SetorAtual FROM FluxosTabela WHERE Id = @id;";
+        selectCmd.Parameters.AddWithValue("@id", id.ToString());
+
+        string numeroOS = "";
+        SetorEnum setorAtual = SetorEnum.Financeiro;
+
+        using (var reader = selectCmd.ExecuteReader())
+        {
+            if (!reader.Read()) return NotFound("OS não encontrada.");
+            numeroOS = reader.GetString(0);
+            setorAtual = (SetorEnum)reader.GetInt32(1);
+        }
+
+        var dataConclusao = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
         var command = connection.CreateCommand();
-        command.CommandText = "UPDATE FluxosTabela SET Status = 2 WHERE Id = @id AND SetorAtual = @setorFinanceiro;";
+        command.CommandText = "UPDATE FluxosTabela SET Status = 2, DataConclusao = @dataConclusao WHERE Id = @id AND SetorAtual = @setorFinanceiro;";
         command.Parameters.AddWithValue("@id", id.ToString());
         command.Parameters.AddWithValue("@setorFinanceiro", (int)SetorEnum.Financeiro);
+        command.Parameters.AddWithValue("@dataConclusao", dataConclusao);
 
         var linhasAfetadas = command.ExecuteNonQuery();
         if (linhasAfetadas == 0) 
             return BadRequest("Não foi possível concluir. Apenas OSs no setor Financeiro podem ser finalizadas.");
 
+        var usuarioLogado = ObterNomeUsuarioLogado();
+        // Grava no Histórico para BI
+        RegistrarHistorico(connection, id, numeroOS, setorAtual, setorAtual, "CONCLUIDA", usuarioLogado);
+
         return Ok();
-    }  
+    }
+
+    [HttpPut("{id}")]
+    public IActionResult Editar(Guid id, [FromBody] EditarFluxoDto dto)
+    {
+        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        var setorUsuarioClaim = User.FindFirst("Setor")?.Value;
+
+        if (role != "Administrador" && setorUsuarioClaim != "Comercial" && setorUsuarioClaim != "Vendas")
+        {
+            return StatusCode(403, "Acesso negado: Apenas Administrador e Comercial podem editar a OS.");
+        }
+
+        if (dto == null || string.IsNullOrWhiteSpace(dto.NumeroOS))
+        {
+            return BadRequest("Dados inválidos para edição.");
+        }
+
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var selectCmd = connection.CreateCommand();
+        selectCmd.CommandText = "SELECT Status, SetorAtual FROM FluxosTabela WHERE Id = @id;";
+        selectCmd.Parameters.AddWithValue("@id", id.ToString());
+
+        SetorEnum setorAtual;
+        using (var reader = selectCmd.ExecuteReader())
+        {
+            if (!reader.Read()) return NotFound("OS não encontrada.");
+            if (reader.GetInt32(0) == 2)
+            {
+                return BadRequest("Ordens de Serviço concluídas não podem ser alteradas.");
+            }
+            setorAtual = (SetorEnum)reader.GetInt32(1);
+        }
+
+        var command = connection.CreateCommand();
+        command.CommandText = @"
+            UPDATE FluxosTabela 
+            SET NumeroOS = @numeroOS, 
+                IdentificadorFluxo = @identificadorFluxo, 
+                NomeCliente = @nomeCliente 
+            WHERE Id = @id;";
+
+        command.Parameters.AddWithValue("@id", id.ToString());
+        command.Parameters.AddWithValue("@numeroOS", dto.NumeroOS.Trim());
+        command.Parameters.AddWithValue("@identificadorFluxo", dto.IdentificadorFluxo?.Trim() ?? "");
+        command.Parameters.AddWithValue("@nomeCliente", dto.NomeCliente?.Trim() ?? "");
+
+        command.ExecuteNonQuery();
+
+        var usuarioLogado = ObterNomeUsuarioLogado();
+        // Grava no Histórico para BI
+        RegistrarHistorico(connection, id, dto.NumeroOS, setorAtual, setorAtual, "EDITADA", usuarioLogado);
+
+        return Ok();
+    }
+
+    [HttpDelete("{id}/cancelar")]
+    public IActionResult Cancelar(Guid id)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        var selectCmd = connection.CreateCommand();
+        selectCmd.CommandText = "SELECT NumeroOS, Status, SetorAtual FROM FluxosTabela WHERE Id = @id;";
+        selectCmd.Parameters.AddWithValue("@id", id.ToString());
+
+        string numeroOS = "";
+        SetorEnum setorAtual;
+
+        using (var reader = selectCmd.ExecuteReader())
+        {
+            if (!reader.Read()) return NotFound("OS não encontrada.");
+            if (reader.GetInt32(1) == 2)
+            {
+                return BadRequest("Ordens de Serviço concluídas não podem ser canceladas.");
+            }
+            numeroOS = reader.GetString(0);
+            setorAtual = (SetorEnum)reader.GetInt32(2);
+        }
+
+        var usuarioLogado = ObterNomeUsuarioLogado();
+        // Grava no Histórico para BI antes de excluir
+        RegistrarHistorico(connection, id, numeroOS, setorAtual, setorAtual, "CANCELADA", usuarioLogado);
+
+        var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM FluxosTabela WHERE Id = @id;";
+        command.Parameters.AddWithValue("@id", id.ToString());
+
+        command.ExecuteNonQuery();
+        return Ok();
+    }
 
     private bool ValidarTransicaoSetor(SetorEnum origem, SetorEnum destino, SetorEnum? setorAnterior)
     {
@@ -285,79 +466,4 @@ public class FluxosController : ControllerBase
             Status = (StatusFluxo)reader.GetInt32(6)
         };
     }
-
-        [HttpPut("{id}")]
-    public IActionResult Editar(Guid id, [FromBody] EditarFluxoDto dto)
-    {
-        var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        var setorUsuarioClaim = User.FindFirst("Setor")?.Value;
-
-        if (role != "Administrador" && setorUsuarioClaim != "Comercial" && setorUsuarioClaim != "Vendas")
-        {
-            return StatusCode(403, "Acesso negado: Apenas Administrador e Comercial podem editar a OS.");
-        }
-
-        if (dto == null || string.IsNullOrWhiteSpace(dto.NumeroOS))
-        {
-            return BadRequest("Dados inválidos para edição.");
-        }
-
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-
-        // Bloqueia se a OS estiver Concluída (Status = 2)
-        var selectCmd = connection.CreateCommand();
-        selectCmd.CommandText = "SELECT Status FROM FluxosTabela WHERE Id = @id;";
-        selectCmd.Parameters.AddWithValue("@id", id.ToString());
-        var statusObj = selectCmd.ExecuteScalar();
-
-        if (statusObj == null) return NotFound("OS não encontrada.");
-        if (Convert.ToInt32(statusObj) == 2)
-        {
-            return BadRequest("Ordens de Serviço concluídas não podem ser alteradas.");
-        }
-
-        var command = connection.CreateCommand();
-        command.CommandText = @"
-            UPDATE FluxosTabela 
-            SET NumeroOS = @numeroOS, 
-                IdentificadorFluxo = @identificadorFluxo, 
-                NomeCliente = @nomeCliente 
-            WHERE Id = @id;";
-
-        command.Parameters.AddWithValue("@id", id.ToString());
-        command.Parameters.AddWithValue("@numeroOS", dto.NumeroOS.Trim());
-        command.Parameters.AddWithValue("@identificadorFluxo", dto.IdentificadorFluxo?.Trim() ?? "");
-        command.Parameters.AddWithValue("@nomeCliente", dto.NomeCliente?.Trim() ?? "");
-
-        command.ExecuteNonQuery();
-        return Ok();
-    }
-
-    [HttpDelete("{id}/cancelar")]
-    public IActionResult Cancelar(Guid id)
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-
-        // Bloqueia se a OS estiver Concluída (Status = 2)
-        var selectCmd = connection.CreateCommand();
-        selectCmd.CommandText = "SELECT Status FROM FluxosTabela WHERE Id = @id;";
-        selectCmd.Parameters.AddWithValue("@id", id.ToString());
-        var statusObj = selectCmd.ExecuteScalar();
-
-        if (statusObj == null) return NotFound("OS não encontrada.");
-        if (Convert.ToInt32(statusObj) == 2)
-        {
-            return BadRequest("Ordens de Serviço concluídas não podem ser canceladas.");
-        }
-
-        var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM FluxosTabela WHERE Id = @id;";
-        command.Parameters.AddWithValue("@id", id.ToString());
-
-        command.ExecuteNonQuery();
-        return Ok();
-    }
-    
 }
